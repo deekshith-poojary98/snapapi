@@ -2,6 +2,8 @@ from test_parser import TestParser
 from api_client import APIClient
 from colorama import init, Fore, Style
 
+# TODO: Code optimization required
+
 init(autoreset=True)
 
 class Engine:
@@ -11,6 +13,7 @@ class Engine:
         self.stop_on_failure = self.suite['options'].get('STOP-ON-FAILURE', True)
         self.failures = []
         self.success = []
+        self.is_setup = False
 
     def run(self):
         print(f"\n{'-'*15} SnapAPI Running {'-'*15}")
@@ -25,15 +28,24 @@ class Engine:
                 break
         self.print_summary()
 
+    def print_setup_info(self, setup_message, test_message, test_case):
+        if self.is_setup:
+            print(f"{Fore.YELLOW} {setup_message}:{Fore.RESET} {test_case}")
+        else:
+            print(f"{Fore.YELLOW}{test_message}:{Fore.RESET} {test_case}")
+
+
     def run_test(self, test_name):
         test = self.suite['test_map'][test_name]
-        print(f"\n✔ {Fore.YELLOW} Running test:{Fore.RESET} {test['name']}")
+
+        self.print_setup_info(" ✔  Running setup", "\n✔  Running test", test['name'])
         if 'description' in test:
-            print(f"✔ {Fore.YELLOW} Description:{Fore.RESET} {test['description']}")
+            self.print_setup_info(" ✔  Setup description", "✔  Test description", test['description'])
         if 'tag' in test:
-            print(f"✔ {Fore.YELLOW} Tag:{Fore.RESET} {test['tag']}")
+            self.print_setup_info(" ✔  Setup tag", "✔  Test tag", test['tag'])
 
         if 'setup' in test:
+            self.is_setup = True
             if not self.run_test(test['setup']):
                 return False
 
@@ -45,8 +57,17 @@ class Engine:
         if 'teardown' in test:
             if not self.run_test(test['teardown']):
                 return False
-        print(f"✔ {Fore.YELLOW} Status:{Fore.GREEN} PASSED")
-        self.success.append(test_name)
+
+        if self.is_setup:
+            print(f"  ✔ {Fore.YELLOW} Setup status:{Fore.GREEN} PASSED")
+        else:
+            if self.is_setup:
+                print(f"\n✔ {Fore.YELLOW} Test status:{Fore.GREEN} PASSED")
+            else:
+                print(f"✔ {Fore.YELLOW} Test status:{Fore.GREEN} PASSED")
+            self.success.append(test_name)
+            print(f"\n{'- '*20}")
+        self.is_setup = False
         return True
 
     def execute_step(self, client, step, test_name):
@@ -70,7 +91,11 @@ class Engine:
                 self.execute_check(check)
             return True
         except AssertionError as e:
-            print(f"❌{Fore.YELLOW} Status:{Fore.RED} FAILED\n{Fore.YELLOW}❌ Reason: {Fore.RED}{e}")
+            if self.is_setup:
+                print(f" ❌{Fore.YELLOW} Setup status:{Fore.RED} FAILED\n{Fore.YELLOW} ❌ Reason: {Fore.RED}{e}")
+            else:
+                print(f"❌{Fore.YELLOW} Test Status:{Fore.RED} FAILED\n{Fore.YELLOW}❌ Reason: {Fore.RED}{e}")
+            print(f"\n{'- '*20}")
             self.failures.append((test_name, str(e)))
             return False
 
