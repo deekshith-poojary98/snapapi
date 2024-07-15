@@ -13,7 +13,9 @@ class TestParser:
 
         for line in lines:
             line = line.strip()
-            if line.startswith('SUITE:'):
+            if line.startswith('/') or line == '':
+                continue
+            elif line.startswith('SUITE:'):
                 suite['name'] = line.replace('SUITE: ', '')
             elif line.startswith('DESC:'):
                 if 'name' in suite and 'description' not in suite:
@@ -25,6 +27,9 @@ class TestParser:
                     current_test['base_url'] = line.replace('URL: ', '')
                 else:
                     base_url = line.replace('URL: ', '')
+            elif line.startswith('OPTIONS:'):
+                options = json.loads(line.replace('OPTIONS: ', ''))
+                suite['options'] = options
             elif line.startswith('TEST:'):
                 if current_test:
                     tests.append(current_test)
@@ -55,4 +60,5 @@ class TestParser:
 
         suite['tests'] = tests
         suite['test_map'] = test_map
+        suite.setdefault('options', {'STOP-ON-FAILURE': True})  # Set default options if not provided
         return suite
