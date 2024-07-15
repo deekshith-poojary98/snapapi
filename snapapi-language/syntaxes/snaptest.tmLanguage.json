@@ -29,7 +29,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.snaptest",
-                    "match": "\\b(SUITE|DESC|URL|TEST|DATA|SET|CHECK|SETUP|TEARDOWN|TAG|REQUEST|EXPECT|STATUS|CONTAINS)\\b"
+                    "match": "\\b(SUITE|DESC|URL|TEST|DATA|SETUP|TEARDOWN|TAG|REQUEST|EXPECT|STATUS|CONTAINS|OPTIONS)\\b"
                 }
             ]
         },
@@ -38,18 +38,6 @@
                 {
                     "name": "keyword.other.httpmethod.snaptest",
                     "match": "\\b(GET|POST|DELETE|PUT|PATCH)\\b"
-                }
-            ]
-        },
-        "assertionKeywords": {
-            "patterns": [
-                {
-                    "name": "keyword.assertion.status.snaptest",
-                    "match": "\\bSTATUS\\b"
-                },
-                {
-                    "name": "keyword.assertion.expect.snaptest",
-                    "match": "\\bEXPECT\\b"
                 }
             ]
         },
