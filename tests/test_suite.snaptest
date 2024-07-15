@@ -1,5 +1,6 @@
 SUITE: Reqres sample APIs
 DESC: Test your front-end against a real API
+OPTIONS: {"STOP-ON-FAILURE": false}
 
 URL: https://reqres.in
 
@@ -14,3 +15,4 @@ DESC: This test case return a single user
 TAG: setup
   REQUEST: GET /api/users/2
   EXPECT: STATUS 200
+  EXPECT: CONTAINS data
