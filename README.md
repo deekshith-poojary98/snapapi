@@ -32,6 +32,7 @@ Define your test suite: Create a file with .test extension, for example, test_su
 ```
 SUITE: Book Store Application 
 DESC: This test suite validates the API calls
+OPTIONS: {"STOP-ON-FAILURE": false}
 
 URL: https://api.example.com
 
