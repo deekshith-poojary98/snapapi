@@ -1,0 +1,83 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "SnapTest",
+    "patterns": [
+        {
+            "include": "#keywords"
+        },
+        {
+            "include": "#httpMethods"
+        },
+        {
+            "include": "#assertionKeywords"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#numbers"
+        },
+        {
+            "include": "#urls"
+        }
+    ],
+    "repository": {
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.snaptest",
+                    "match": "\\b(SUITE|DESC|URL|TEST|DATA|SET|CHECK|SETUP|TEARDOWN|TAG|REQUEST|EXPECT|STATUS|CONTAINS)\\b"
+                }
+            ]
+        },
+        "httpMethods": {
+            "patterns": [
+                {
+                    "name": "keyword.other.httpmethod.snaptest",
+                    "match": "\\b(GET|POST|DELETE|PUT|PATCH)\\b"
+                }
+            ]
+        },
+        "assertionKeywords": {
+            "patterns": [
+                {
+                    "name": "keyword.assertion.status.snaptest",
+                    "match": "\\bSTATUS\\b"
+                },
+                {
+                    "name": "keyword.assertion.expect.snaptest",
+                    "match": "\\bEXPECT\\b"
+                }
+            ]
+        },
+        "strings": {
+            "name": "string.quoted.double.snaptest",
+            "begin": "\"",
+            "end": "\"",
+            "patterns": [
+                {
+                    "name": "constant.character.escape.snaptest",
+                    "match": "\\\\."
+                }
+            ]
+        },
+        "comments": {
+            "name": "comment.line.double-slash.snaptest",
+            "begin": "//",
+            "end": "$"
+        },
+        "numbers": {
+            "name": "constant.numeric.snaptest",
+            "match": "\\b\\d+\\b"
+        },
+        "urls": {
+            "name": "support.constant.url.snaptest",
+            "match": "(https?|ftp|file)://[-A-Za-z0-9+&@#/%?=~_|!:,.;]*[-A-Za-z0-9+&@#/%=~_|]"
+        }
+    },
+    "scopeName": "source.snaptest",
+    "uuid": "c735ff89-1fc6-4701-9e29-6de20702a66d"
+}

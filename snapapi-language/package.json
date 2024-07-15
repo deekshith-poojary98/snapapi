@@ -1,0 +1,40 @@
+{
+  "name": "snapapi-language",
+  "displayName": "SnapAPI Language Support",
+  "description": "Custom syntax highlighting for SnapAPI test files",
+  "version": "0.0.1",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Deekshith-07/snapapi.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Deekshith-07/snapapi/issues"
+  },
+  "homepage": "https://github.com/Deekshith-07/snapapi#readme",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "snaptest",
+      "aliases": ["SnapTest", "snaptest"],
+      "extensions": [".snaptest"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "snaptest",
+      "scopeName": "source.snaptest",
+      "path": "./syntaxes/snaptest.tmLanguage.json"
+    }]
+  },
+  "devDependencies": {
+    "@types/node": "^14.14.31",
+    "typescript": "^4.0.3",
+    "vscode": "^1.60.0",
+    "vscode-test": "^1.3.1"
+  }
+}

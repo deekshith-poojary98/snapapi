@@ -1,0 +1,16 @@
+SUITE: Reqres sample APIs
+DESC: Test your front-end against a real API
+
+URL: https://reqres.in
+
+TEST: List Users
+DESC: This test case return the list of users
+TAG: setup
+  REQUEST: GET /api/users?page=2
+  EXPECT: STATUS 200
+
+TEST: Single User
+DESC: This test case return a single user
+TAG: setup
+  REQUEST: GET /api/users/2
+  EXPECT: STATUS 200
