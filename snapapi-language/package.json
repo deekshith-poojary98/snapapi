@@ -2,8 +2,12 @@
   "name": "snapapi-language",
   "displayName": "SnapAPI Language Support",
   "description": "Custom syntax highlighting for SnapAPI test files",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "license": "MIT",
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:snaptest"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/Deekshith-07/snapapi.git"
@@ -29,7 +33,18 @@
       "language": "snaptest",
       "scopeName": "source.snaptest",
       "path": "./syntaxes/snaptest.tmLanguage.json"
-    }]
+    }],
+    "commands": [{
+      "command": "snapapi.runCurrentFile",
+      "title": "SnapAPI: Run current file"
+    }],
+    "menus": {
+      "editor/context": [{
+        "command": "snapapi.runCurrentFile",
+        "when": "resourceExtname == .snaptest",
+        "group": "navigation"
+      }]
+    }
   },
   "devDependencies": {
     "@types/node": "^14.14.31",

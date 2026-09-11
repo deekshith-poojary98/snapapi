@@ -1,18 +1,53 @@
+// Example suite against reqres.in (requires network).
+// Automated pytest coverage uses a local mock server instead of this file.
+
 SUITE: Reqres sample APIs
-DESC: Test your front-end against a real API
-OPTIONS: {"STOP-ON-FAILURE": false}
+DESC: Example tests against https://reqres.in
+OPTIONS: {"STOP-ON-FAILURE": false, "TIMEOUT": 15}
 
 URL: https://reqres.in
+HEADERS: {"Content-Type": "application/json"}
+
+TEST: Create User
+DESC: POST with a JSON body and save the returned id
+TAG: users, write
+  REQUEST: POST /api/users
+  DATA: {"name": "Jane", "job": "leader"}
+  EXPECT: STATUS 201
+  EXPECT: CONTAINS id
+  SAVE: userId FROM $.id
 
 TEST: List Users
-DESC: This test case return the list of users
-TAG: setup
+DESC: Return a paginated list of users
+TAG: users
   REQUEST: GET /api/users?page=2
   EXPECT: STATUS 200
+  EXPECT: CONTAINS data
+  EXPECT: HEADER Content-Type CONTAINS json
 
 TEST: Single User
-DESC: This test case return a single user
-TAG: setup
+DESC: Fetch one user and check a JSON field
+TAG: users
+SETUP: List Users
   REQUEST: GET /api/users/2
   EXPECT: STATUS 200
-  EXPECT: CONTAINS data
+  EXPECT: JSON $.data.id == 2
+  EXPECT: CONTAINS email
+
+TEST: Cleanup User
+DESC: Example DELETE used as teardown
+TAG: users
+  REQUEST: DELETE /api/users/${userId}
+  EXPECT: STATUS 204 RETRY 3
+
+TEST: Update User
+DESC: PUT then PATCH with setup and teardown
+TAG: users, write
+SETUP: Create User
+TEARDOWN: Cleanup User
+  REQUEST: PUT /api/users/${userId}
+  DATA: {"name": "Jane Doe", "job": "lead"}
+  EXPECT: STATUS 200
+  REQUEST: PATCH /api/users/${userId}
+  DATA: {"job": "principal"}
+  EXPECT: STATUS 200

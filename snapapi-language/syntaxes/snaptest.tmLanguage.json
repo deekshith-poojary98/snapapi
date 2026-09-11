@@ -3,6 +3,9 @@
     "name": "SnapTest",
     "patterns": [
         {
+            "include": "#comments"
+        },
+        {
             "include": "#keywords"
         },
         {
@@ -12,10 +15,10 @@
             "include": "#assertionKeywords"
         },
         {
-            "include": "#strings"
+            "include": "#variables"
         },
         {
-            "include": "#comments"
+            "include": "#strings"
         },
         {
             "include": "#numbers"
@@ -29,7 +32,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.snaptest",
-                    "match": "\\b(SUITE|DESC|URL|TEST|DATA|SETUP|TEARDOWN|TAG|REQUEST|EXPECT|STATUS|CONTAINS|OPTIONS)\\b"
+                    "match": "\\b(SUITE|DESC|URL|TEST|DATA|HEADERS|SETUP|TEARDOWN|TAG|REQUEST|EXPECT|OPTIONS|SAVE|IMPORT|FROM)\\b"
                 }
             ]
         },
@@ -41,6 +44,22 @@
                 }
             ]
         },
+        "assertionKeywords": {
+            "patterns": [
+                {
+                    "name": "keyword.other.assertion.snaptest",
+                    "match": "\\b(STATUS|CONTAINS|JSON|HEADER|RETRY)\\b"
+                }
+            ]
+        },
+        "variables": {
+            "patterns": [
+                {
+                    "name": "variable.other.interpolated.snaptest",
+                    "match": "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}"
+                }
+            ]
+        },
         "strings": {
             "name": "string.quoted.double.snaptest",
             "begin": "\"",
@@ -49,6 +68,10 @@
                 {
                     "name": "constant.character.escape.snaptest",
                     "match": "\\\\."
+                },
+                {
+                    "name": "variable.other.interpolated.snaptest",
+                    "match": "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}"
                 }
             ]
         },

@@ -1,9 +1,10 @@
 # Change Log
 
-All notable changes to the "snapapi-language" extension will be documented in this file.
+## [0.0.2]
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+- Highlight HEADERS, SAVE, IMPORT, JSON, HEADER, RETRY, FROM, and `${VAR}`
+- Add **SnapAPI: Run current file** command
 
-## [Unreleased]
+## [0.0.1]
 
-- Initial release
+- Initial release with `.snaptest` syntax highlighting
