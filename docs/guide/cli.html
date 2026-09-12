@@ -44,7 +44,7 @@ snapapi tests/ suites/auth.sapi</code></pre>
           <tr><td><code>--name "Create User"</code></td><td>Run tests with this name (repeatable).</td></tr>
           <tr><td><code>--grep regex</code></td><td>Filter tests by name or description.</td></tr>
           <tr><td><code>-D TOKEN=secret</code> / <code>--variable</code></td><td>Set <code>${VAR}</code> without an env file (Robot-style). Repeatable; overrides <code>--profile</code>.</td></tr>
-          <tr><td><code>--env .env</code></td><td>Load <code>KEY=VALUE</code> pairs for <code>${VAR}</code> interpolation.</td></tr>
+          <tr><td><code>--env .env</code></td><td>Load <code>KEY=VALUE</code> pairs for <code>${VAR}</code>. If omitted: <code>&lt;suite&gt;.env</code>, then <code>.env</code> beside the suite, then a single sibling <code>*.env</code>.</td></tr>
           <tr><td><code>--profile stage</code></td><td>Load <code>environments/stage.env</code>, <code>.snapapi/stage.env</code>, or <code>stage.env</code>.</td></tr>
           <tr><td><code>--timeout 10</code></td><td>HTTP timeout in seconds (overrides suite <code>TIMEOUT</code>).</td></tr>
           <tr><td><code>-x</code> / <code>--exitfirst</code> / <code>--stop-on-failure</code></td><td>Stop each suite on the first failed test (pytest <code>-x</code>). Off by default: remaining tests keep running after a failure.</td></tr>

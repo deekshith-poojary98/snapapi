@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+from pathlib import Path
 
 from snapapi.exceptions import ParseError, SnapAPIError
 from snapapi.helpers import expand_helpers
@@ -45,6 +46,43 @@ def base_variables(env_file=None, extra=None):
     return merged
 
 
+def discover_env_file(suite_path):
+    """Find a KEY=VALUE file next to a suite when ``--env`` was omitted.
+
+    Order: ``<stem>.env``, then ``.env`` in that directory, then the only
+    other ``*.env`` sibling (``*.env.example`` is ignored).
+    """
+    suite = Path(suite_path)
+    parent = suite.parent
+    stem = parent / f"{suite.stem}.env"
+    if stem.is_file():
+        return str(stem)
+    hidden = parent / ".env"
+    if hidden.is_file():
+        return str(hidden)
+    siblings = []
+    try:
+        for path in parent.iterdir():
+            if not path.is_file():
+                continue
+            name = path.name
+            if name.endswith(".env.example") or name.endswith(".example"):
+                continue
+            if name.endswith(".env"):
+                siblings.append(path)
+    except OSError:
+        return None
+    if len(siblings) == 1:
+        return str(siblings[0])
+    return None
+
+
+def resolve_env_file(explicit, suite_path):
+    if explicit:
+        return explicit
+    return discover_env_file(suite_path)
+
+
 def interpolate(value, variables):
     """Replace helpers and ``${VAR}`` in strings; walk dicts and lists."""
     value = expand_helpers(value)
@@ -64,7 +102,10 @@ def _interpolate_string(value, variables):
     def repl(match):
         name = match.group(1)
         if name not in variables or variables[name] is None:
-            raise SnapAPIError(f"Undefined variable ${{{name}}}")
+            hint = ""
+            if name.isupper():
+                hint = ". Set it in the environment or pass --env"
+            raise SnapAPIError(f"Undefined variable ${{{name}}}{hint}")
         return str(variables[name])
 
     return VAR_PATTERN.sub(repl, value)

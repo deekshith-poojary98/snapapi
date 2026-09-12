@@ -7,7 +7,7 @@ import pytest
 
 from snapapi.engine import Engine, SuiteResult
 from snapapi.parser import TestParser
-from snapapi.variables import base_variables
+from snapapi.variables import base_variables, resolve_env_file
 
 
 def pytest_configure(config):
@@ -21,7 +21,11 @@ def pytest_configure(config):
 def snapapi_run():
     def _run(path, **engine_kwargs):
         suite = TestParser().parse(path)
-        variables = dict(engine_kwargs.pop("variables", None) or base_variables())
+        env_file = engine_kwargs.pop("env_file", None)
+        if "variables" in engine_kwargs:
+            variables = dict(engine_kwargs.pop("variables") or {})
+        else:
+            variables = base_variables(env_file=resolve_env_file(env_file, path))
         stream = engine_kwargs.pop("stream", io.StringIO())
         engine = Engine(suite, variables=variables, stream=stream, **engine_kwargs)
         result = engine.run()

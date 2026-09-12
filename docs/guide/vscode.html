@@ -61,7 +61,7 @@ code --install-extension snapapi-language-0.1.0.vsix</code></pre>
       <table>
         <thead><tr><th>Setting</th><th>Default</th><th>Meaning</th></tr></thead>
         <tbody>
-          <tr><td><code>snapapi.cliPath</code></td><td><code>snapapi</code></td><td>CLI executable. <code>${workspaceFolder}</code> is expanded.</td></tr>
+          <tr><td><code>snapapi.cliPath</code></td><td><code>snapapi</code></td><td>CLI executable. <code>${workspaceFolder}</code> is expanded. Default <code>snapapi</code> also looks in <code>.venv/bin</code> (GUI editors often omit the venv from <code>PATH</code>).</td></tr>
           <tr><td><code>snapapi.envFile</code></td><td>empty</td><td>Optional <code>--env</code> file for interpolation.</td></tr>
           <tr><td><code>snapapi.profile</code></td><td>empty</td><td>Optional <code>--profile</code> name.</td></tr>
         </tbody>
@@ -72,7 +72,7 @@ code --install-extension snapapi-language-0.1.0.vsix</code></pre>
 }</code></pre>
 
       <h2>Run current file</h2>
-      <p>With a <code>.sapi</code> editor focused, run <strong>SnapAPI: Run current file</strong> from the command palette. The file is saved, then the extension runs <code>snapapi &lt;file&gt;</code>. <strong>Run test at cursor</strong> uses the nearest <code>TEST:</code> above the cursor and passes <code>--name</code>. Output goes to the SnapAPI channel; the status bar shows the last result while a <code>.sapi</code> file is active.</p>
+      <p>With a <code>.sapi</code> editor focused, run <strong>SnapAPI: Run current file</strong> from the command palette. The file is saved, then the extension runs <code>snapapi &lt;file&gt;</code>. SnapAPI loads a sibling env file automatically (<code>&lt;suite&gt;.env</code>, <code>.env</code>, or the only <code>*.env</code> next to the suite) unless <code>snapapi.envFile</code> is set. <strong>Run test at cursor</strong> uses the nearest <code>TEST:</code> above the cursor and passes <code>--name</code>. Output goes to the SnapAPI channel; the status bar shows the last result while a <code>.sapi</code> file is active.</p>
       <div class="callout">The playground does not use the extension. Use it to learn the DSL; use the CLI (or these commands) for real HTTP.</div>
       <div class="page-nav">
         <a href="ci.html"><span>Previous</span>CI / reports</a>

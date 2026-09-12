@@ -61,7 +61,7 @@ Options:
 | `--tag user` | Run tests that have this tag (repeatable; all given tags must match) |
 | `--exclude slow` | Skip tests with this tag (repeatable) |
 | `--name "Create User"` | Run tests with this name (repeatable) |
-| `--env .env` | Load `KEY=VALUE` pairs for `${VAR}` interpolation |
+| `--env .env` | Load `KEY=VALUE` pairs for `${VAR}`. If omitted, SnapAPI loads `<suite>.env`, then `.env` next to the file, then a single sibling `*.env` |
 | `-D TOKEN=secret` | Set `${VAR}` from the CLI (repeatable) |
 | `--timeout 10` | HTTP timeout in seconds (overrides `TIMEOUT`) |
 | `--report json:report.json` | Write a JSON report |
@@ -240,7 +240,7 @@ XPath uses stdlib `xml.etree` (descendant tags and `/@attr`). Axes, namespaces, 
 
 `${NAME}` is expanded in URLs, paths, headers, data, and expect values.
 
-Lookup order: process environment, then `--env` file, then `SET` / `SAVE` values.
+Lookup order: process environment, then `--env` / auto-discovered suite env file, then `SET` / `SAVE` values.
 
 ## Sample suite
 

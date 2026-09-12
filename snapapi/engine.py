@@ -185,6 +185,7 @@ class Engine:
         self,
         suite,
         variables=None,
+        env_file=None,
         timeout=None,
         tags=None,
         names=None,
@@ -221,6 +222,7 @@ class Engine:
     ):
         self.suite = suite
         self.variables = dict(variables or {})
+        self.env_file = env_file
         options = suite.get("options") or {}
         if timeout is not None:
             self.timeout = float(timeout)
@@ -286,6 +288,8 @@ class Engine:
         self._print(f"{self._paint('SnapAPI', Fore.CYAN, Style.BRIGHT)}  {name}")
         if self.verbosity >= 1 and self.suite.get("description"):
             self._print(self._paint(self.suite["description"], Style.DIM))
+        if self.verbosity >= 1 and self.env_file:
+            self._print(self._paint(f"  env {self.env_file}", Style.DIM))
         self._apply_sets(self.suite.get("sets"))
         self._notify("start_suite", self._suite_info())
 

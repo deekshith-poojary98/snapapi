@@ -17,7 +17,7 @@ from snapapi.profiles import load_profile
 from snapapi.reports import build_report_payload, write_html_report, write_json_report, write_junit_report
 from snapapi.select import parse_bool_expr
 from snapapi.suites import find_suite_files
-from snapapi.variables import base_variables
+from snapapi.variables import base_variables, resolve_env_file
 
 
 def build_parser():
@@ -73,7 +73,11 @@ def _add_run_args(parser, optional=False):
     parser.add_argument("--name", action="append", dest="names", metavar="TEST", default=None)
     parser.add_argument("--grep", help="Regex filter on test name/description")
     parser.add_argument("-D", "--variable", action="append", dest="cli_vars", metavar="KEY=VALUE", help="Set ${VAR} (repeatable; Robot-style)")
-    parser.add_argument("--env", dest="env_file", help="KEY=VALUE env file used for ${VAR} interpolation")
+    parser.add_argument(
+        "--env",
+        dest="env_file",
+        help="KEY=VALUE file for ${VAR}. If omitted, loads <suite>.env, then .env, then a single sibling *.env",
+    )
     parser.add_argument("--profile", help="Load environments/<name>.env, .snapapi/<name>.env, or <name>.env")
     parser.add_argument("--timeout", type=float, default=None)
     parser.add_argument("--report", action="append", default=[], metavar="KIND:PATH")
@@ -187,16 +191,18 @@ def run_suites(
     color=None,
 ):
     parser = TestParser()
-    variables = base_variables(env_file=env_file, extra=extra_vars)
     loaded = list(listeners or [])
     results = []
     remaining = maxfail
     try:
         for file_path in files:
+            resolved_env = resolve_env_file(env_file, file_path)
+            variables = base_variables(env_file=resolved_env, extra=extra_vars)
             suite = parser.parse(file_path)
             engine = Engine(
                 suite,
                 variables=dict(variables),
+                env_file=resolved_env,
                 timeout=timeout,
                 tags=tags,
                 exclude_tags=exclude_tags,
@@ -377,8 +383,13 @@ def _cmd_lint(argv):
     extra = {}
     if args.profile:
         extra.update(load_profile(args.profile))
-    variables = base_variables(env_file=args.env_file, extra=extra or None)
-    issues = lint_files(files, variables=variables, strict=args.strict)
+    issues = []
+    for path in files:
+        variables = base_variables(
+            env_file=resolve_env_file(args.env_file, path),
+            extra=extra or None,
+        )
+        issues.extend(lint_files([path], variables=variables, strict=args.strict))
     text = format_issues(issues)
     if text:
         print(text)
@@ -560,13 +571,15 @@ def _collect_from_args(args):
         if not last_failed:
             raise SnapAPIError("No last-failed tests recorded")
     parser = TestParser()
-    variables = base_variables(env_file=args.env_file, extra=extra or None)
     count = 0
     for file_path in files:
+        resolved_env = resolve_env_file(args.env_file, file_path)
+        variables = base_variables(env_file=resolved_env, extra=extra or None)
         suite = parser.parse(file_path)
         engine = Engine(
             suite,
             variables=dict(variables),
+            env_file=resolved_env,
             tags=args.tags,
             exclude_tags=getattr(args, "exclude_tags", None),
             names=names,

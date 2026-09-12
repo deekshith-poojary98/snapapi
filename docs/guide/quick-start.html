@@ -56,7 +56,7 @@ SETUP: Create User
   EXPECT: header Content-Type contains json</code></pre>
 
       <h2>2. Provide variables</h2>
-      <p><code>${TOKEN}</code> is interpolated from the process environment, then an optional <code>--env</code> file, then <code>SET</code> / <code>SAVE</code> values. A <code>.env</code> file looks like:</p>
+      <p><code>${TOKEN}</code> is interpolated from the process environment, then <code>--env</code> or a file next to the suite (<code>users.env</code>, <code>.env</code>, or the only sibling <code>*.env</code>), then <code>SET</code> / <code>SAVE</code>. A <code>.env</code> file looks like:</p>
       <pre><code class="language-bash">TOKEN=your-bearer-token</code></pre>
 
       <h2>3. Run it</h2>

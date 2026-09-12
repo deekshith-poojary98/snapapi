@@ -169,7 +169,7 @@ EXPECT: xpath //Order/@id == "1"</code></pre>
       <pre><code class="language-snaptest">SAVE: userId FROM $.id
 SAVE: requestId FROM header X-Request-Id
 SET: orderId ${uuid()}</code></pre>
-      <p><code>${NAME}</code> expands in URLs, paths, headers, bodies, and expect values. Lookup order: process environment, then <code>--env</code> / <code>--profile</code>, then <code>SET</code> / <code>SAVE</code>. Helpers: <code>${uuid()}</code>, <code>${now()}</code>, <code>${random.int(min,max)}</code>. Undefined variables are errors.</p>
+      <p><code>${NAME}</code> expands in URLs, paths, headers, bodies, and expect values. Lookup order: process environment, then <code>--env</code> / auto-discovered suite env / <code>--profile</code>, then <code>SET</code> / <code>SAVE</code>. Helpers: <code>${uuid()}</code>, <code>${now()}</code>, <code>${random.int(min,max)}</code>. Undefined variables are errors.</p>
       <p>The playground seeds <code>${TOKEN}</code> as <code>playground-token</code> so bearer samples run without an env file.</p>
 
       <h2 id="wait">WAIT and retries</h2>

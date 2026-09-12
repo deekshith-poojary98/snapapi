@@ -106,6 +106,24 @@ TEST: Auth
     assert http_server.requests[0]["headers"].get("Authorization") == "Bearer abc123"
 
 
+def test_cli_discovers_sibling_env(http_server, tmp_path):
+    http_server.on("GET", "/secure", json={"ok": True})
+    suite = tmp_path / "auth.sapi"
+    _write_suite(
+        suite,
+        http_server,
+        """
+TEST: Auth
+  REQUEST: GET /secure
+  HEADERS: {"Authorization": "Bearer ${TOKEN}"}
+  EXPECT: STATUS 200
+""",
+    )
+    (tmp_path / "auth.env").write_text("TOKEN=from-sibling\n", encoding="utf-8")
+    assert main([str(suite)]) == 0
+    assert http_server.requests[0]["headers"].get("Authorization") == "Bearer from-sibling"
+
+
 def test_cli_reports(http_server, tmp_path, capsys):
     http_server.on("GET", "/ok", json={"ok": True})
     suite = tmp_path / "ok.snaptest"

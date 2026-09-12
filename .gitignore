@@ -18,3 +18,5 @@ examples/*.env
 .idea/
 *.vsix
 .snapapi/
+.vscode/
+.cursor/
