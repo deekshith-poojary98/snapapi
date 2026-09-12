@@ -3,7 +3,7 @@
 
 SUITE: Reqres sample APIs
 DESC: Example tests against https://reqres.in
-OPTIONS: {"STOP-ON-FAILURE": false, "TIMEOUT": 15}
+OPTIONS: {"TIMEOUT": 15}
 
 URL: https://reqres.in
 HEADERS: {"Content-Type": "application/json"}

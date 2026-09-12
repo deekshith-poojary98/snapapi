@@ -462,6 +462,14 @@ TEST: Items
     assert "GET" in text
     assert "/items" in text
     assert "response:" in text
+    assert 'class="tok-key"' in text
+    assert 'class="tok-num"' in text
+    from snapapi.reports import _highlight_json
+
+    highlighted = _highlight_json('{"ok": true, "n": 1, "s": "x"}')
+    assert 'class="tok-str">' in highlighted
+    assert 'class="tok-kw">' in highlighted
+    assert "&quot;x&quot;" in highlighted
 
 
 def test_wait_and_expect_retry_until_ready(http_server):

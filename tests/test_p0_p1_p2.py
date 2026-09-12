@@ -4,7 +4,7 @@ from pathlib import Path
 from snapapi.cli import main
 from snapapi.fmt import format_text
 from snapapi.openapi import generate_smoke
-from snapapi.redact import redact_headers
+from snapapi.redact import redact_headers, redact_saved
 from tests.helpers import parse_dsl, run_dsl
 
 
@@ -239,7 +239,7 @@ TEST: Gamma
   GET: /c
   EXPECT: status == 200
 """,
-            extra="SUITE SETUP: Authenticate",
+            extra="SUITE-SETUP: Authenticate",
         )
     )
     assert result.ok
@@ -385,6 +385,15 @@ TEST: Meta
 def test_redact_headers_unit():
     assert redact_headers({"Authorization": "Bearer abc", "X-Trace": "1"})["Authorization"] == "***"
     assert redact_headers({"X-Trace": "1"})["X-Trace"] == "1"
+
+
+def test_redact_saved_hides_tokens():
+    jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIn0.signature"
+    assert redact_saved("accessToken", jwt) == "***"
+    assert redact_saved("refreshToken", jwt) == "***"
+    assert redact_saved("password", "Rajesh@123") == "***"
+    assert redact_saved("userId", "7") == "7"
+    assert redact_saved("email", "jane@example.com") == "jane@example.com"
 
 
 def test_parse_new_keywords():

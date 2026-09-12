@@ -106,7 +106,7 @@ TEST: Auth
     assert http_server.requests[0]["headers"].get("Authorization") == "Bearer abc123"
 
 
-def test_cli_reports(http_server, tmp_path):
+def test_cli_reports(http_server, tmp_path, capsys):
     http_server.on("GET", "/ok", json={"ok": True})
     suite = tmp_path / "ok.snaptest"
     _write_suite(suite, http_server, """
@@ -123,6 +123,9 @@ TAG: smoke
         "--report", f"junit:{junit_path}",
     ])
     assert code == 0
+    printed = capsys.readouterr().out
+    assert f"Report (json): {json_path.resolve()}" in printed
+    assert f"Report (junit): {junit_path.resolve()}" in printed
     payload = json.loads(json_path.read_text(encoding="utf-8"))
     assert payload["ok"] is True
     assert payload["passed"] == 1
@@ -137,7 +140,6 @@ def test_cli_reports_include_failures(http_server, tmp_path):
     http_server.on("GET", "/ok", status=404, json={})
     suite = tmp_path / "bad.snaptest"
     _write_suite(suite, http_server, """
-OPTIONS: {"STOP-ON-FAILURE": false}
 TEST: Missing
   REQUEST: GET /ok
   EXPECT: STATUS 200
@@ -175,6 +177,22 @@ TEST: B
     assert sorted(item["path"] for item in http_server.requests) == ["/a", "/b"]
 
 
+def test_cli_collects_sapi_extension(http_server, tmp_path):
+    from snapapi.cli import collect_files
+
+    http_server.on("GET", "/a", json={"ok": True})
+    folder = tmp_path / "suites"
+    folder.mkdir()
+    _write_suite(folder / "a.sapi", http_server, """
+TEST: A
+  REQUEST: GET /a
+  EXPECT: STATUS 200
+""")
+    files = collect_files([str(folder)])
+    assert [path.name for path in files] == ["a.sapi"]
+    assert main([str(folder)]) == 0
+
+
 def test_cli_missing_path(tmp_path):
     assert main([str(tmp_path / "nope.snaptest")]) == 2
 
@@ -184,7 +202,6 @@ def test_cli_stop_on_failure_flag(http_server, tmp_path):
     http_server.on("GET", "/ok", json={"ok": True})
     suite = tmp_path / "suite.snaptest"
     _write_suite(suite, http_server, """
-OPTIONS: {"STOP-ON-FAILURE": false}
 TEST: First
   REQUEST: GET /fail
   EXPECT: STATUS 200
@@ -194,6 +211,101 @@ TEST: Second
 """)
     assert main([str(suite), "--stop-on-failure"]) == 1
     assert [item["path"] for item in http_server.requests] == ["/fail"]
+
+    http_server.requests.clear()
+    assert main([str(suite)]) == 1
+    assert [item["path"] for item in http_server.requests] == ["/fail", "/ok"]
+
+
+def test_cli_exitfirst_alias(http_server, tmp_path):
+    http_server.on("GET", "/fail", status=500, json={})
+    http_server.on("GET", "/ok", json={"ok": True})
+    suite = tmp_path / "suite.snaptest"
+    _write_suite(suite, http_server, """
+TEST: First
+  GET: /fail
+  EXPECT: status == 200
+TEST: Second
+  GET: /ok
+  EXPECT: status == 200
+""")
+    assert main([str(suite), "-x"]) == 1
+    assert [item["path"] for item in http_server.requests] == ["/fail"]
+
+
+def test_cli_keyword_and_exclude(http_server, tmp_path, capsys):
+    http_server.on("GET", "/login", json={"ok": True})
+    http_server.on("GET", "/health", json={"ok": True})
+    http_server.on("GET", "/slow", json={"ok": True})
+    suite = tmp_path / "filters.snaptest"
+    _write_suite(suite, http_server, """
+TEST: Login
+TAG: auth smoke
+  GET: /login
+  EXPECT: status == 200
+TEST: Health
+TAG: health
+  GET: /health
+  EXPECT: status == 200
+TEST: Slow path
+TAG: smoke slow
+  GET: /slow
+  EXPECT: status == 200
+""")
+    assert main([str(suite), "-k", "Login or Health"]) == 0
+    assert [item["path"] for item in http_server.requests] == ["/login", "/health"]
+
+    http_server.requests.clear()
+    assert main([str(suite), "-m", "smoke and not slow"]) == 0
+    assert [item["path"] for item in http_server.requests] == ["/login"]
+
+    http_server.requests.clear()
+    assert main([str(suite), "--exclude", "slow"]) == 0
+    assert [item["path"] for item in http_server.requests] == ["/login", "/health"]
+
+    capsys.readouterr()
+    assert main([str(suite), "--collect-only", "-m", "smoke"]) == 0
+    collected = capsys.readouterr().out
+    assert "Login" in collected
+    assert "Slow path" in collected
+    assert "Health" not in collected
+    assert "2 tests collected" in collected
+
+
+def test_cli_variable_and_version(http_server, tmp_path, capsys):
+    http_server.on("GET", "/secure", json={"ok": True})
+    suite = tmp_path / "vars.snaptest"
+    _write_suite(suite, http_server, """
+TEST: Auth
+  GET: /secure
+  HEADER Authorization: Bearer ${TOKEN}
+  EXPECT: status == 200
+""")
+    assert main([str(suite), "-D", "TOKEN=abc123"]) == 0
+    assert http_server.requests[0]["headers"].get("Authorization") == "Bearer abc123"
+
+    assert main(["--version"]) == 0
+    assert "snapapi " in capsys.readouterr().out
+
+
+def test_cli_maxfail(http_server, tmp_path):
+    http_server.on("GET", "/a", status=500, json={})
+    http_server.on("GET", "/b", status=500, json={})
+    http_server.on("GET", "/c", json={"ok": True})
+    suite = tmp_path / "maxfail.snaptest"
+    _write_suite(suite, http_server, """
+TEST: A
+  GET: /a
+  EXPECT: status == 200
+TEST: B
+  GET: /b
+  EXPECT: status == 200
+TEST: C
+  GET: /c
+  EXPECT: status == 200
+""")
+    assert main([str(suite), "--maxfail", "2"]) == 1
+    assert [item["path"] for item in http_server.requests] == ["/a", "/b"]
 
 
 def test_parse_dsl_helper_still_works():
@@ -211,7 +323,6 @@ def test_cli_new_syntax(http_server, tmp_path):
         http_server,
         """
 TIMEOUT: 5
-STOP-ON-FAILURE: false
 TEST: Auth
 TAG: smoke
   GET: /secure

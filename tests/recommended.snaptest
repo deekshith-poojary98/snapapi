@@ -3,7 +3,6 @@
 SUITE: Recommended syntax
 DESC: End-to-end suite using the current SnapAPI DSL
 TIMEOUT: 5
-STOP-ON-FAILURE: false
 URL: ${BASE_URL}
 HEADER Content-Type: application/json
 

@@ -121,6 +121,29 @@ TEST: User
     assert "jane@example.com" in (result.tests[0].error or "")
 
 
+def test_expect_or_and_grouping(http_server):
+    http_server.on("POST", "/login", status=401, json={"success": False, "error": "bad credentials"})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Login
+  POST: /login
+  EXPECT: status == 400 OR status == 401
+  EXPECT: json $.success == false AND body contains error
+  EXPECT: (status == 400 OR status == 401) AND json $.success == false
+"""))
+    assert result.ok
+
+
+def test_expect_or_all_fail(http_server):
+    http_server.on("GET", "/x", status=200, json={"ok": True})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Status
+  GET: /x
+  EXPECT: status == 400 OR status == 401
+"""))
+    assert not result.ok
+    assert "OR expected at least one check to pass" in (result.tests[0].error or "")
+
+
 def test_save_and_interpolation_across_tests(http_server):
     http_server.on("POST", "/api/users", status=201, json={"data": {"id": "42", "email": "jane@example.com"}})
     http_server.on("GET", "/api/users/42", json={"data": {"id": "42", "email": "jane@example.com"}})
@@ -174,30 +197,187 @@ TEARDOWN: Tear
     assert result.total == 1
 
 
+def test_helper_suite_setup_is_not_a_primary(http_server):
+    http_server.on("POST", "/login", json={"token": "abc"})
+    http_server.on("GET", "/me", json={"ok": True})
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Authenticate
+  POST: /login
+  EXPECT: status == 200
+  SAVE: token FROM $.token
+SUITE-SETUP: Authenticate
+TEST: Me
+  GET: /me
+  HEADER Authorization: Bearer ${token}
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert result.ok
+    assert [test.name for test in result.tests] == ["Me"]
+    assert "Authenticate" not in [test.name for test in result.tests]
+    assert [item["path"] for item in http_server.requests] == ["/login", "/me"]
+    assert "setup Authenticate" in output
+
+
+def test_depends_skips_when_upstream_fails(http_server):
+    http_server.on("GET", "/create", status=500, json={})
+    http_server.on("GET", "/get", json={"ok": True})
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+TEST: Create User
+  GET: /create
+  EXPECT: status == 200
+TEST: Get User
+DEPENDS: Create User
+  GET: /get
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.failed == 1
+    assert result.skipped == 1
+    assert result.tests[1].status == "skipped"
+    assert "depends on 'Create User' which failed" in result.tests[1].error
+    assert [item["path"] for item in http_server.requests] == ["/create"]
+    assert "SKIP" in output
+
+
+def test_depends_skips_when_upstream_skipped(http_server):
+    http_server.on("GET", "/create", json={"ok": True})
+    http_server.on("GET", "/get", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+TEST: Create User
+SKIP: wip
+  GET: /create
+  EXPECT: status == 200
+TEST: Get User
+DEPENDS: Create User
+  GET: /get
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert result.ok
+    assert result.skipped == 2
+    assert "depends on 'Create User' which was skipped" in result.tests[1].error
+    assert http_server.requests == []
+
+
+def test_depends_skips_when_upstream_not_run(http_server):
+    http_server.on("GET", "/create", json={"ok": True})
+    http_server.on("GET", "/get", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+TEST: Create User
+  GET: /create
+  EXPECT: status == 200
+TEST: Get User
+DEPENDS: Create User
+  GET: /get
+  EXPECT: status == 200
+""",
+        ),
+        names=["Get User"],
+    )
+    assert result.ok
+    assert result.skipped == 1
+    assert result.passed == 0
+    assert "depends on 'Create User' which has not run" in result.tests[0].error
+    assert http_server.requests == []
+
+
+def test_depends_runs_when_upstream_passes(http_server):
+    http_server.on("GET", "/create", json={"ok": True})
+    http_server.on("GET", "/get", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+TEST: Create User
+  GET: /create
+  EXPECT: status == 200
+TEST: Get User
+DEPENDS: Create User
+  GET: /get
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert result.ok
+    assert result.passed == 2
+    assert [item["path"] for item in http_server.requests] == ["/create", "/get"]
+
+
+def test_depends_chain_skips_transitively(http_server):
+    http_server.on("GET", "/a", status=500, json={})
+    http_server.on("GET", "/b", json={"ok": True})
+    http_server.on("GET", "/c", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+TEST: A
+  GET: /a
+  EXPECT: status == 200
+TEST: B
+DEPENDS: A
+  GET: /b
+  EXPECT: status == 200
+TEST: C
+DEPENDS: B
+  GET: /c
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.failed == 1
+    assert result.skipped == 2
+    assert "depends on 'A' which failed" in result.tests[1].error
+    assert "depends on 'B' which was skipped" in result.tests[2].error
+    assert [item["path"] for item in http_server.requests] == ["/a"]
+
+
 def test_stop_on_failure_true_halts(http_server):
     http_server.on("GET", "/ok", json={"ok": True})
     http_server.on("GET", "/fail", status=500, json={"ok": False})
-    result, _, output = run_dsl(_suite(http_server, """
-OPTIONS: {"STOP-ON-FAILURE": true}
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
 TEST: First
   REQUEST: GET /fail
   EXPECT: STATUS 200
 TEST: Second
   REQUEST: GET /ok
   EXPECT: STATUS 200
-"""))
+""",
+        ),
+        stop_on_failure=True,
+    )
     assert not result.ok
     assert result.failed == 1
     assert result.passed == 0
     assert [item["path"] for item in http_server.requests] == ["/fail"]
-    assert "STOP-ON-FAILURE: false" in output
+    assert "omit -x / --stop-on-failure to continue" in output
 
 
 def test_stop_on_failure_false_continues(http_server):
     http_server.on("GET", "/ok", json={"ok": True})
     http_server.on("GET", "/fail", status=500, json={"ok": False})
     result, _, _ = run_dsl(_suite(http_server, """
-OPTIONS: {"STOP-ON-FAILURE": false}
 TEST: First
   REQUEST: GET /fail
   EXPECT: STATUS 200
@@ -478,7 +658,6 @@ def test_new_syntax_request_body_auth_query_and_expect(http_server):
             http_server,
             """
 TIMEOUT: 5
-STOP-ON-FAILURE: false
 HEADER Content-Type: application/json
 TEST: Create
   POST: /users

@@ -10,7 +10,7 @@ def test_parses_suite_test_url_options_and_request():
         """
 SUITE: Demo
 DESC: Suite description
-OPTIONS: {"STOP-ON-FAILURE": false, "TIMEOUT": 5}
+OPTIONS: {"TIMEOUT": 5}
 URL: https://api.example.com
 
 TEST: List Users
@@ -23,7 +23,6 @@ TAG: users, read
     assert suite["name"] == "Demo"
     assert suite["description"] == "Suite description"
     assert suite["base_url"] == "https://api.example.com"
-    assert suite["options"]["STOP-ON-FAILURE"] is False
     assert suite["options"]["TIMEOUT"] == 5
     test = suite["tests"][0]
     assert test["name"] == "List Users"
@@ -251,6 +250,138 @@ SETUP: A
         )
 
 
+def test_depends_parses_names():
+    suite = parse_dsl(
+        """
+SUITE: Demo
+TEST: Create User
+  GET: /x
+  EXPECT: status == 200
+TEST: Get User
+DEPENDS: Create User
+  GET: /y
+  EXPECT: status == 200
+TEST: List Users
+DEPENDS: Create User, Get User
+  GET: /z
+  EXPECT: status == 200
+"""
+    )
+    assert suite["test_map"]["Get User"]["depends"] == ["Create User"]
+    assert suite["test_map"]["List Users"]["depends"] == ["Create User", "Get User"]
+
+
+def test_unknown_depends_name_is_parse_error():
+    with pytest.raises(ParseError, match="Unknown DEPENDS test 'Missing'"):
+        parse_dsl(
+            """
+SUITE: Demo
+TEST: A
+DEPENDS: Missing
+  GET: /x
+  EXPECT: status == 200
+"""
+        )
+
+
+def test_depends_on_self_is_parse_error():
+    with pytest.raises(ParseError, match="cannot DEPENDS on itself"):
+        parse_dsl(
+            """
+SUITE: Demo
+TEST: A
+DEPENDS: A
+  GET: /x
+  EXPECT: status == 200
+"""
+        )
+
+
+def test_depends_cycle_is_parse_error():
+    with pytest.raises(ParseError, match="DEPENDS cycle detected"):
+        parse_dsl(
+            """
+SUITE: Demo
+TEST: A
+DEPENDS: B
+  GET: /a
+  EXPECT: status == 200
+TEST: B
+DEPENDS: A
+  GET: /b
+  EXPECT: status == 200
+"""
+        )
+
+
+def test_depends_on_setup_helper_is_parse_error():
+    with pytest.raises(ParseError, match="HELPER, not a primary TEST"):
+        parse_dsl(
+            """
+SUITE: Demo
+TEST: Login
+  GET: /login
+  EXPECT: status == 200
+TEST: Get User
+SETUP: Login
+DEPENDS: Login
+  GET: /me
+  EXPECT: status == 200
+"""
+        )
+
+
+def test_helper_is_not_a_primary():
+    suite = parse_dsl(
+        """
+SUITE: Demo
+HELPER: Authenticate
+  POST: /login
+  EXPECT: status == 200
+SUITE-SETUP: Authenticate
+TEST: A
+  GET: /x
+  EXPECT: status == 200
+"""
+    )
+    assert suite["test_map"]["Authenticate"]["kind"] == "helper"
+    assert suite["test_map"]["A"]["kind"] == "test"
+    assert suite["setup"] == "Authenticate"
+
+
+def test_skip_on_helper_is_parse_error():
+    with pytest.raises(ParseError, match="SKIP cannot appear on a HELPER"):
+        parse_dsl(
+            """
+SUITE: Demo
+HELPER: Auth
+SKIP: later
+  GET: /login
+  EXPECT: status == 200
+TEST: A
+  GET: /x
+  EXPECT: status == 200
+"""
+        )
+
+
+def test_depends_on_helper_is_parse_error():
+    with pytest.raises(ParseError, match="HELPER, not a primary TEST"):
+        parse_dsl(
+            """
+SUITE: Demo
+HELPER: Authenticate
+  GET: /login
+  EXPECT: status == 200
+SUITE-SETUP: Authenticate
+TEST: Logout
+DEPENDS: Authenticate
+  GET: /logout
+  EXPECT: status == 200
+"""
+        )
+
+
 def test_multiline_data_json():
     suite = parse_dsl(
         """
@@ -282,7 +413,7 @@ URL: https://test.example.com
     assert suite["tests"][0]["base_url"] == "https://test.example.com"
 
 
-def test_default_stop_on_failure_true():
+def test_stop_on_failure_is_not_a_suite_option():
     suite = parse_dsl(
         """
 SUITE: Demo
@@ -291,7 +422,34 @@ TEST: A
   EXPECT: STATUS 200
 """
     )
-    assert suite["options"]["STOP-ON-FAILURE"] is True
+    assert "STOP-ON-FAILURE" not in suite["options"]
+
+
+def test_legacy_options_stop_on_failure_is_ignored():
+    suite = parse_dsl(
+        """
+SUITE: Demo
+OPTIONS: {"STOP-ON-FAILURE": true, "TIMEOUT": 5}
+TEST: A
+  REQUEST: GET /x
+  EXPECT: STATUS 200
+"""
+    )
+    assert "STOP-ON-FAILURE" not in suite["options"]
+    assert suite["options"]["TIMEOUT"] == 5
+
+
+def test_stop_on_failure_keyword_is_unknown():
+    with pytest.raises(ParseError, match=r"Unknown keyword 'STOP-ON-FAILURE'"):
+        parse_dsl(
+            """
+SUITE: Demo
+STOP-ON-FAILURE: false
+TEST: A
+  REQUEST: GET /x
+  EXPECT: STATUS 200
+"""
+        )
 
 
 def test_import_merges_tests(tmp_path):
@@ -344,33 +502,30 @@ TEST: A
         )
 
 
-def test_first_class_timeout_and_stop_on_failure():
+def test_first_class_timeout():
     suite = parse_dsl(
         """
 SUITE: Demo
 TIMEOUT: 10
-STOP-ON-FAILURE: false
 TEST: A
   REQUEST: GET /x
   EXPECT: STATUS 200
 """
     )
     assert suite["options"]["TIMEOUT"] == 10
-    assert suite["options"]["STOP-ON-FAILURE"] is False
 
 
 def test_first_class_options_merge_with_options_json():
     suite = parse_dsl(
         """
 SUITE: Demo
-OPTIONS: {"STOP-ON-FAILURE": false}
+OPTIONS: {"TIMEOUT": 5}
 TIMEOUT: 7
 TEST: A
   REQUEST: GET /x
   EXPECT: STATUS 200
 """
     )
-    assert suite["options"]["STOP-ON-FAILURE"] is False
     assert suite["options"]["TIMEOUT"] == 7
 
 
@@ -492,6 +647,76 @@ TEST: Checks
     assert checks[4]["retry"] == 5
 
 
+def test_expect_and_or_and_grouping():
+    suite = parse_dsl(
+        """
+SUITE: Demo
+TEST: Checks
+  GET: /x
+  EXPECT: status == 400 OR status == 401
+  EXPECT: json $.success == false AND body contains error
+  EXPECT: (status == 400 OR status == 401) AND json $.success == false
+  EXPECT: status == 200 OR status == 400 AND json $.ok == true
+"""
+    )
+    checks = suite["tests"][0]["steps"][0]["checks"]
+    assert checks[0]["type"] == "OR"
+    assert [term["value"] for term in checks[0]["terms"]] == ["400", "401"]
+    assert checks[1]["type"] == "AND"
+    assert checks[1]["terms"][0]["type"] == "JSON"
+    assert checks[1]["terms"][1]["type"] == "CONTAINS"
+    assert checks[1]["terms"][1]["value"] == "error"
+    grouped = checks[2]
+    assert grouped["type"] == "AND"
+    assert grouped["terms"][0]["type"] == "OR"
+    assert grouped["terms"][1]["type"] == "JSON"
+    precedence = checks[3]
+    assert precedence["type"] == "OR"
+    assert precedence["terms"][0]["type"] == "STATUS"
+    assert precedence["terms"][0]["value"] == "200"
+    assert precedence["terms"][1]["type"] == "AND"
+
+
+def test_expect_quoted_and_is_not_combinator():
+    suite = parse_dsl(
+        """
+SUITE: Demo
+TEST: A
+  GET: /x
+  EXPECT: body contains "foo AND bar"
+"""
+    )
+    check = suite["tests"][0]["steps"][0]["checks"][0]
+    assert check["type"] == "CONTAINS"
+    assert check["value"] == "foo AND bar"
+
+
+def test_expect_jsonpath_filter_parens_are_not_grouping():
+    suite = parse_dsl(
+        """
+SUITE: Demo
+TEST: A
+  GET: /x
+  EXPECT: json $.items[?(@.status=="open")].id contains 3
+"""
+    )
+    check = suite["tests"][0]["steps"][0]["checks"][0]
+    assert check["type"] == "JSON"
+    assert check["path"] == '$.items[?(@.status=="open")].id'
+
+
+def test_expect_unbalanced_paren_is_error():
+    with pytest.raises(ParseError, match="Unbalanced parentheses"):
+        parse_dsl(
+            """
+SUITE: Demo
+TEST: A
+  GET: /x
+  EXPECT: (status == 400 OR status == 401
+"""
+        )
+
+
 def test_expect_status_without_spaces_around_operator():
     suite = parse_dsl(
         """
@@ -568,7 +793,7 @@ def test_recommended_suite_parses():
     suite = TestParser().parse(Path(__file__).parent / "recommended.snaptest")
     assert suite["name"] == "Recommended syntax"
     assert suite["options"]["TIMEOUT"] == 5
-    assert suite["options"]["STOP-ON-FAILURE"] is False
+    assert "STOP-ON-FAILURE" not in suite["options"]
     assert suite["headers"]["Content-Type"] == "application/json"
     create = suite["test_map"]["Create User"]
     assert create["tags"] == ["users", "write"]
@@ -580,6 +805,63 @@ def test_recommended_suite_parses():
     listing = suite["test_map"]["List Users"]
     assert listing["steps"][0]["query"]["page"] == "2"
     assert listing["steps"][0]["query"]["sort"] == "name"
+
+
+def test_suite_setup_hyphenated():
+    suite = parse_dsl(
+        """
+SUITE: Demo
+SUITE-SETUP: Auth
+SUITE-TEARDOWN: Auth
+TEST: Auth
+  GET: /login
+  EXPECT: status == 200
+TEST: A
+  GET: /x
+  EXPECT: status == 200
+"""
+    )
+    assert suite["setup"] == "Auth"
+    assert suite["teardown"] == "Auth"
+
+
+def test_suite_setup_space_separated_is_error():
+    with pytest.raises(ParseError, match="Keywords cannot contain spaces; use SUITE-SETUP"):
+        parse_dsl(
+            """
+SUITE: Demo
+SUITE SETUP: Auth
+TEST: Auth
+  GET: /login
+  EXPECT: status == 200
+"""
+        )
+
+
+def test_spaced_keyword_typo_suggests_closest_known():
+    with pytest.raises(ParseError, match=r"did you mean FOLLOW-REDIRECTS\?"):
+        parse_dsl(
+            """
+SUITE: Demo
+FOLLO REDIRECTS: true
+TEST: A
+  GET: /x
+  EXPECT: status == 200
+"""
+        )
+
+
+def test_unknown_hyphenated_keyword_suggests_closest_known():
+    with pytest.raises(ParseError, match=r"Did you mean FOLLOW-REDIRECTS\?"):
+        parse_dsl(
+            """
+SUITE: Demo
+FOLLO-REDIRECTS: true
+TEST: A
+  GET: /x
+  EXPECT: status == 200
+"""
+        )
 
 
 def test_sample_suite_parses():
