@@ -34,6 +34,13 @@ def test_wildcard_map():
     assert extract(data, "$.items[*].id") == [10, 20]
 
 
-def test_filter_not_supported():
-    with pytest.raises(JsonPathError, match="not supported"):
-        extract([{"x": 1}], "$[?(@.x==1)]")
+def test_filter_equality():
+    data = {"items": [{"id": 1, "status": "open"}, {"id": 2, "status": "closed"}]}
+    assert extract(data, '$.items[?(@.status=="open")]') == [{"id": 1, "status": "open"}]
+    assert extract(data, "$.items[?(@.id==1)]") == [{"id": 1, "status": "open"}]
+    assert extract(data, '$.items[?(@.status=="open")].id') == [1]
+
+
+def test_filter_root_array():
+    data = [{"x": 1}, {"x": 2}]
+    assert extract(data, "$[?(@.x==1)]") == [{"x": 1}]

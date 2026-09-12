@@ -27,9 +27,13 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+watch = ["watchdog>=2.1"]
 
 [project.scripts]
 snapapi = "snapapi.cli:entry"
+
+[project.entry-points.pytest11]
+snapapi = "snapapi.pytest_plugin"
 
 [project.urls]
 Homepage = "https://github.com/Deekshith-07/snapapi"

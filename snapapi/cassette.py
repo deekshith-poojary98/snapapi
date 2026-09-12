@@ -5,20 +5,46 @@ import json
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-CASSETTE_HEADERS = ("accept", "content-type")
+DEFAULT_VCR_MATCH = ("query", "body", "content-type", "accept")
+VCR_HEADER_ALIASES = {
+    "content_type": "content-type",
+    "content-type": "content-type",
+    "accept": "accept",
+    "authorization": "authorization",
+}
 
 
-def cassette_key(method, url, body=None, headers=None):
+def parse_vcr_match(value):
+    if value is None:
+        return list(DEFAULT_VCR_MATCH)
+    if isinstance(value, str):
+        items = [item.strip().lower() for item in value.replace(";", ",").split(",") if item.strip()]
+    elif isinstance(value, (list, tuple)):
+        items = [str(item).strip().lower() for item in value if str(item).strip()]
+    else:
+        return list(DEFAULT_VCR_MATCH)
+    return [VCR_HEADER_ALIASES.get(item, item) for item in items] or list(DEFAULT_VCR_MATCH)
+
+
+def cassette_key(method, url, body=None, headers=None, match=None):
+    match_keys = parse_vcr_match(match)
     parts = urlsplit(url or "")
-    query = sorted(parse_qsl(parts.query, keep_blank_values=True))
-    canonical = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
+    if "query" in match_keys:
+        query = sorted(parse_qsl(parts.query, keep_blank_values=True))
+        query_blob = urlencode(query)
+    else:
+        query_blob = ""
+    canonical = urlunsplit((parts.scheme, parts.netloc, parts.path, query_blob, parts.fragment))
+    wanted_headers = {item for item in match_keys if item in ("accept", "content-type", "authorization")}
     selected = []
     for key, value in (headers or {}).items():
-        if str(key).lower() in CASSETTE_HEADERS:
-            selected.append((str(key).lower(), "" if value is None else str(value)))
+        lowered = str(key).lower()
+        if lowered in wanted_headers:
+            selected.append((lowered, "" if value is None else str(value)))
     selected.sort()
     header_blob = "\n".join(f"{key}:{value}" for key, value in selected)
-    raw = f"{method.upper()}\n{canonical}\n{header_blob}\n{_body_text(body)}"
+    body_blob = _body_text(body) if "body" in match_keys else ""
+    raw = f"{method.upper()}\n{canonical}\n{header_blob}\n{body_blob}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 

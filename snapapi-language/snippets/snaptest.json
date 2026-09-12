@@ -46,6 +46,16 @@
         "body": "GET: ${1:/path}",
         "description": "GET request alias"
     },
+    "HEAD request": {
+        "prefix": "HEAD",
+        "body": "HEAD: ${1:/path}",
+        "description": "HEAD request alias"
+    },
+    "OPTIONS request": {
+        "prefix": ["REQUEST-OPTIONS", "HTTP-OPTIONS"],
+        "body": "REQUEST: OPTIONS ${1:/path}",
+        "description": "HTTP OPTIONS via REQUEST (suite OPTIONS is JSON config)"
+    },
     "POST request": {
         "prefix": "POST",
         "body": [

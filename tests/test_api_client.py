@@ -23,3 +23,11 @@ def test_get_put_patch_delete(http_server):
     assert client.put("/items/1", data={"n": 2}).json() == {"n": 2}
     assert client.patch("/items/1", data={"n": 3}).json() == {"n": 3}
     assert client.delete("/items/1").status_code == 204
+
+
+def test_head_and_options(http_server):
+    http_server.on("HEAD", "/x", status=204, text="")
+    http_server.on("OPTIONS", "/cors", status=204, text="")
+    client = APIClient(http_server.base_url, timeout=2)
+    assert client.head("/x").status_code == 204
+    assert client.options("/cors").status_code == 204

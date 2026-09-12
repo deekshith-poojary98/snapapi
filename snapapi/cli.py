@@ -85,6 +85,9 @@ def _add_run_args(parser, optional=False):
     parser.add_argument("--cert", metavar="PATH", help="Client certificate for TLS")
     parser.add_argument("--cacert", metavar="PATH", help="CA bundle used to verify TLS")
     parser.add_argument("--record-on-miss", action="store_true", help="In replay mode, record missing cassettes")
+    parser.add_argument("--contract-strict", action="store_true", help="Fail on unmatched OpenAPI path/schema")
+    parser.add_argument("--vcr-match", dest="vcr_match", help="Cassette match fields, e.g. query,body,accept,authorization")
+    parser.add_argument("--reruns", type=int, default=None, metavar="N", help="Re-run failed tests up to N times")
 
 
 def collect_files(paths):
@@ -147,6 +150,9 @@ def run_suites(
     cert=None,
     proxies=None,
     record_on_miss=False,
+    contract_strict=None,
+    vcr_match=None,
+    reruns=None,
 ):
     parser = TestParser()
     variables = base_variables(env_file=env_file, extra=extra_vars)
@@ -174,6 +180,9 @@ def run_suites(
             cert=cert,
             proxies=proxies,
             record_on_miss=record_on_miss,
+            contract_strict=contract_strict,
+            vcr_match=vcr_match,
+            reruns=reruns,
         )
         results.append(engine.run())
     return results
@@ -253,6 +262,9 @@ def _run_from_args(args):
         cert=tls["cert"],
         proxies=tls["proxies"],
         record_on_miss=record_on_miss,
+        contract_strict=getattr(args, "contract_strict", False) or None,
+        vcr_match=getattr(args, "vcr_match", None),
+        reruns=getattr(args, "reruns", None),
     )
     write_last_run(results)
     append_history(results)
@@ -338,20 +350,34 @@ def _cmd_watch(argv):
     _add_run_args(parser)
     parser.add_argument("--interval", type=float, default=0.5)
     args = parser.parse_args(argv)
-    from snapapi.watch import snapshot_mtimes
+    from snapapi.watch import snapshot_mtimes, try_watchdog_observer
 
     files = collect_files(args.paths)
     previous, _ = snapshot_mtimes(files)
+    pending = {"changed": False}
+
+    def mark_changed():
+        pending["changed"] = True
+
+    observer = try_watchdog_observer(files, mark_changed)
     code = _run_from_args(args)
+    interval = max(0.05, float(args.interval or 0.5))
     try:
         while True:
-            time.sleep(max(0.05, float(args.interval or 0.5)))
+            time.sleep(interval)
             files = collect_files(args.paths)
             previous, changed = snapshot_mtimes(files, previous)
+            if observer is not None:
+                changed = list(changed) or (["watchdog"] if pending["changed"] else [])
+                pending["changed"] = False
             if changed:
                 code = _run_from_args(args)
     except KeyboardInterrupt:
         return code
+    finally:
+        if observer is not None:
+            observer.stop()
+            observer.join(timeout=2)
 
 
 def _cmd_openapi(argv):

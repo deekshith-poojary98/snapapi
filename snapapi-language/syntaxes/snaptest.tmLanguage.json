@@ -78,7 +78,7 @@
             "patterns": [
                 {
                     "name": "keyword.other.assertion.snaptest",
-                    "match": "(?i)\\b(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|RETRY|INLINE|OPENAPI)\\b"
+                    "match": "(?i)\\b(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|RETRY|INLINE|OPENAPI|XPATH)\\b"
                 },
                 {
                     "include": "#operators"
@@ -144,7 +144,7 @@
             "patterns": [
                 {
                     "name": "keyword.other.httpmethod.snaptest",
-                    "match": "(?i)\\b(GET|POST|PUT|PATCH|DELETE)\\b"
+                    "match": "(?i)\\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\\b"
                 },
                 {
                     "include": "#values"
@@ -152,7 +152,7 @@
             ]
         },
         "httpMethodLines": {
-            "begin": "^(\\s*)(GET|POST|PUT|PATCH|DELETE)(:)",
+            "begin": "^(\\s*)(GET|POST|PUT|PATCH|DELETE|HEAD)(:)",
             "end": "$",
             "beginCaptures": {
                 "2": {

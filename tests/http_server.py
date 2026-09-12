@@ -92,6 +92,12 @@ class _Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self._dispatch("DELETE")
 
+    def do_HEAD(self):
+        self._dispatch("HEAD")
+
+    def do_OPTIONS(self):
+        self._dispatch("OPTIONS")
+
     def _dispatch(self, method):
         parsed = urlparse(self.path)
         body = self._read_body()

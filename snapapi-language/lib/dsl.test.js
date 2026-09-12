@@ -20,6 +20,22 @@ test("flags REQUEST without method and path", () => {
     assert.ok(findings.some((item) => /REQUEST must be in the form/.test(item.message)));
 });
 
+test("accepts HEAD and REQUEST OPTIONS", () => {
+    const findings = dsl.analyze(`TEST: Cors
+  HEAD: /x
+  REQUEST: OPTIONS /cors
+  EXPECT: status == 200
+`);
+    assert.equal(findings.length, 0);
+});
+
+test("flags OPTIONS inside a TEST as HTTP-method confusion", () => {
+    const findings = dsl.analyze(`TEST: Cors
+  OPTIONS: /cors
+`);
+    assert.ok(findings.some((item) => /REQUEST: OPTIONS/.test(item.message)));
+});
+
 test("flags unknown SETUP names", () => {
     const findings = dsl.analyze("TEST: A\n  GET: /x\nSETUP: Missing\n");
     assert.ok(findings.some((item) => /Unknown SETUP test 'Missing'/.test(item.message)));

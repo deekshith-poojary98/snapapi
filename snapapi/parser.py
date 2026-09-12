@@ -9,7 +9,8 @@ from urllib.parse import parse_qsl
 
 from snapapi.exceptions import ParseError
 
-HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
+HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+REQUEST_METHODS = set(HTTP_METHODS)
 LINE_KEYWORD_RE = re.compile(r"^([A-Z][A-Z0-9_-]*):(.*)$")
 HEADER_LINE_RE = re.compile(r"^HEADER\s+(\S+)\s*:\s*(.*)$")
 SUITE_HOOK_RE = re.compile(r"^SUITE\s+(SETUP|TEARDOWN):\s*(.*)$", re.IGNORECASE)
@@ -56,15 +57,27 @@ WAIT_TAIL_RE = re.compile(
     re.IGNORECASE,
 )
 EXPECT_KIND_RE = re.compile(
-    r"^(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|OPENAPI)(?:\s+|(?==)|$)(.*)$",
+    r"^(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|OPENAPI|XPATH)(?:\s+|(?==)|$)(.*)$",
     re.IGNORECASE | re.DOTALL,
 )
 JSON_LENGTH_RE = re.compile(
     r"^(\S+)\s+length\s+(==|!=|>=|<=|>|<)\s+(.+)$",
     re.DOTALL | re.IGNORECASE,
 )
+JSON_EACH_RE = re.compile(
+    r"^(.+?)\s+each\s+(\S+)\s+(==|!=|CONTAINS|MATCHES|>=|<=|>|<)\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_CONTAINS_ALL_RE = re.compile(
+    r"^(.+?)\s+contains(?:-|\s+)all\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
 JSON_EXPECT_RE = re.compile(
     r"^(\S+)\s+(==|!=|CONTAINS|MATCHES|>=|<=|>|<)\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+XPATH_EXPECT_RE = re.compile(
+    r"^(\S+)\s+(==|!=|CONTAINS)\s+(.+)$",
     re.DOTALL | re.IGNORECASE,
 )
 HEADER_EXPECT_RE = re.compile(r"^(\S+)\s+(==|!=|CONTAINS)\s+(.+)$", re.DOTALL | re.IGNORECASE)
@@ -110,6 +123,7 @@ class TestParser:
             "teardown": None,
             "follow_redirects": None,
             "oauth2": None,
+            "digest": None,
             "sets": [],
             "tests": [],
             "test_map": {},
@@ -204,6 +218,7 @@ class TestParser:
                     "only": False,
                     "quarantine": None,
                     "sets": [],
+                    "digest": None,
                     "source": filename,
                     "lineno": lineno,
                 }
@@ -222,7 +237,7 @@ class TestParser:
                 self._require_test(current_test, keyword, filename, lineno)
                 current_step = self._parse_request(rest, filename, lineno)
                 current_test["steps"].append(current_step)
-            elif keyword in HTTP_METHODS:
+            elif keyword == "HEAD" or (keyword in HTTP_METHODS and keyword != "OPTIONS"):
                 self._require_test(current_test, keyword, filename, lineno)
                 if not rest:
                     raise ParseError(f"{keyword} requires a path", filename=filename, lineno=lineno)
@@ -277,6 +292,14 @@ class TestParser:
                         current_test["oauth2"] = oauth
                     else:
                         suite["oauth2"] = oauth
+                elif "_digest" in headers:
+                    digest = headers["_digest"]
+                    if current_step is not None:
+                        current_step["digest"] = digest
+                    elif current_test is not None:
+                        current_test["digest"] = digest
+                    else:
+                        suite["digest"] = digest
                 else:
                     self._apply_headers(headers, suite, current_test, current_step)
             elif keyword == "EXPECT":
@@ -357,7 +380,7 @@ class TestParser:
                 lineno=lineno,
             )
         method, endpoint = parts[0].upper(), parts[1]
-        if method not in HTTP_METHODS:
+        if method not in REQUEST_METHODS:
             raise ParseError(f"Unknown HTTP method '{method}'", filename=filename, lineno=lineno)
         return self._new_step(method, endpoint, lineno)
 
@@ -377,6 +400,7 @@ class TestParser:
             "follow_redirects": None,
             "wait": None,
             "sets": [],
+            "digest": None,
             "lineno": lineno,
         }
 
@@ -457,15 +481,17 @@ class TestParser:
                     lineno=lineno,
                 )
             grant = (params.get("grant") or params.get("grant_type") or "client_credentials").lower()
+            if grant in ("authorization-code", "authorization_code"):
+                grant = "authorization_code"
             if grant == "password" and (not params.get("username") or not params.get("password")):
                 raise ParseError(
                     "AUTH oauth2 grant=password requires username and password",
                     filename=filename,
                     lineno=lineno,
                 )
-            if grant not in ("password", "client_credentials"):
+            if grant not in ("password", "client_credentials", "authorization_code"):
                 raise ParseError(
-                    "AUTH oauth2 supports grant=password or grant=client_credentials (PKCE is not implemented)",
+                    "AUTH oauth2 supports grant=password, grant=client_credentials, or grant=authorization_code",
                     filename=filename,
                     lineno=lineno,
                 )
@@ -478,6 +504,21 @@ class TestParser:
                 lineno=lineno,
             )
         scheme, value = parts[0], parts[1]
+        if scheme.lower() == "digest":
+            if ":" not in value:
+                raise ParseError(
+                    "AUTH digest must look like: AUTH: digest user:pass",
+                    filename=filename,
+                    lineno=lineno,
+                )
+            username, _, password = value.partition(":")
+            if not username:
+                raise ParseError(
+                    "AUTH digest must look like: AUTH: digest user:pass",
+                    filename=filename,
+                    lineno=lineno,
+                )
+            return {"_digest": {"username": username, "password": password}}
         if scheme.lower() == "basic" and ":" in value:
             import base64
 
@@ -573,12 +614,31 @@ class TestParser:
             check.update({"type": "CONTAINS", "value": _strip_quotes(value), "negated": negated})
         elif kind == "JSON":
             length_match = JSON_LENGTH_RE.match(remainder)
+            each_match = JSON_EACH_RE.match(remainder)
+            contains_all_match = JSON_CONTAINS_ALL_RE.match(remainder)
             if length_match:
                 check.update({
                     "type": "JSON",
                     "path": length_match.group(1),
                     "operator": "length " + length_match.group(2),
                     "value": _parse_expect_value(length_match.group(3).strip()),
+                })
+            elif each_match:
+                operator = each_match.group(3)
+                check.update({
+                    "type": "JSON",
+                    "path": each_match.group(1).strip(),
+                    "operator": "EACH",
+                    "each_path": each_match.group(2).strip(),
+                    "each_operator": operator.upper() if operator.upper() in ("CONTAINS", "MATCHES") else operator,
+                    "value": _parse_expect_value(each_match.group(4).strip()),
+                })
+            elif contains_all_match:
+                check.update({
+                    "type": "JSON",
+                    "path": contains_all_match.group(1).strip(),
+                    "operator": "CONTAINS-ALL",
+                    "value": _parse_expect_value(contains_all_match.group(2).strip()),
                 })
             else:
                 match = JSON_EXPECT_RE.match(remainder)
@@ -633,7 +693,25 @@ class TestParser:
         elif kind == "OPENAPI":
             if not remainder:
                 raise ParseError("EXPECT openapi requires a spec path", filename=filename, lineno=lineno)
-            check.update({"type": "OPENAPI", "path": remainder})
+            spec_path, strict = _parse_openapi_spec(remainder)
+            if not spec_path:
+                raise ParseError("EXPECT openapi requires a spec path", filename=filename, lineno=lineno)
+            check.update({"type": "OPENAPI", "path": spec_path, "strict": strict})
+        elif kind == "XPATH":
+            match = XPATH_EXPECT_RE.match(remainder)
+            if not match:
+                raise ParseError(
+                    'EXPECT xpath must look like: xpath //Order/@id == "1"',
+                    filename=filename,
+                    lineno=lineno,
+                )
+            operator = match.group(2)
+            check.update({
+                "type": "XPATH",
+                "path": match.group(1),
+                "operator": operator.upper() if operator.upper() == "CONTAINS" else operator,
+                "value": _parse_expect_value(match.group(3).strip()),
+            })
         else:
             raise ParseError(f"Unknown EXPECT check '{kind}'", filename=filename, lineno=lineno)
         return check
@@ -822,6 +900,15 @@ class TestParser:
                 filename=filename,
                 lineno=lineno,
             )
+
+
+def _parse_openapi_spec(remainder):
+    parts = remainder.split()
+    strict = False
+    if parts and parts[-1].lower() == "strict":
+        strict = True
+        parts = parts[:-1]
+    return " ".join(parts), strict
 
 
 def _strip_quotes(value):

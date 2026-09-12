@@ -640,7 +640,8 @@ def test_watch_snapshot_mtimes(tmp_path):
     previous, changed = snapshot_mtimes([path])
     assert changed == []
     key = str(path.resolve())
-    os.utime(path, (previous[key] + 5, previous[key] + 5))
+    mtime_ns, size = previous[key]
+    os.utime(path, (mtime_ns / 1e9 + 5, mtime_ns / 1e9 + 5))
     _, changed = snapshot_mtimes([path], previous)
     assert changed
 

@@ -5,13 +5,15 @@ Write `.snaptest` files, then run them from the CLI.
 
 ## Features
 
-- Human-readable DSL for GET, POST, PUT, PATCH, and DELETE
+- Human-readable DSL for GET, POST, PUT, PATCH, DELETE, HEAD, and OPTIONS
 - Attach `BODY`/`DATA`, `HEADER`s, `QUERY`/`PARAM`, and `AUTH` to the current request
-- `EXPECT` checks: status, body contains, JSONPath, response headers
+- `EXPECT` checks: status, body contains, JSONPath (filters + collection asserts), XPath, response headers
 - `SAVE` values from JSON responses and reuse them as `${var}`
 - Setup / teardown with cycle detection
 - Env files, tag filters, timeouts, retries, JSON and JUnit reports
-- VS Code syntax highlighting for `.snaptest` files
+- OpenAPI response/request contract checks, VCR cassettes, JSON mock server
+- pytest plugin (`snapapi_run` / `@pytest.mark.snapapi`)
+- VS Code syntax highlighting and diagnostics for `.snaptest` files
 
 ## Requirements
 
@@ -66,6 +68,9 @@ Options:
 | `--last-failed` | Re-run failures from `.snapapi/last-run.json` (matches file + suite + name, including `Test [row]`) |
 | `--mode record\|replay\|record-on-miss` | VCR cassettes under `.snapapi/cassettes/` |
 | `--record-on-miss` | With `--mode replay`, hit the network and save when a cassette is missing |
+| `--vcr-match query,body,accept,authorization` | Cassette identity fields (default: query, content-type, accept, body) |
+| `--contract-strict` | Fail when an OpenAPI path/method/schema is missing (default: skip/warn) |
+| `--reruns N` | Re-run failed *tests* up to N times (distinct from `EXPECT RETRY`) |
 | `--on-fail curl` / `--on-fail har:dir` | Emit a redacted curl or HAR on failure |
 | `--safe-url` | Block private/metadata hosts |
 | `--proxy URL` | HTTP/HTTPS proxy |
@@ -77,7 +82,7 @@ Options:
 | `snapapi openapi spec.yaml` | Generate GET/POST/PUT/PATCH/DELETE smoke tests |
 | `snapapi history [--failed] [--since 7d]` | Print `.snapapi/history.jsonl` |
 | `snapapi mock mock.json [--port 0]` | Serve routes from a JSON mock file (prints the URL) |
-| `snapapi watch PATH` | Re-run when `.snaptest` files change |
+| `snapapi watch PATH [--interval 0.5]` | Re-run when `.snaptest` files change (poll; optional `watchdog` extra) |
 
 The process exits `0` when every test passed, `1` when a test failed, and `2` on parse or usage errors.
 
@@ -144,7 +149,9 @@ EXPECT: HEADER Content-Type CONTAINS json
 
 - Suite: `SUITE`, `DESC`, `URL`, `TIMEOUT`, `STOP-ON-FAILURE`, `FOLLOW-REDIRECTS`, `OPTIONS`, `IMPORT`, `SUITE SETUP`, `SET`
 - Test: `TEST`, `TAG`, `SETUP`, `TEARDOWN`, `SKIP`, `ONLY`, `QUARANTINE`, `EXAMPLES`, `SET`
-- Request: `REQUEST`, `GET`/`POST`/`PUT`/`PATCH`/`DELETE`, `BODY`/`DATA`, `FILE`, `GRAPHQL`, `HEADER`/`HEADERS`, `QUERY`, `PARAM`, `AUTH`, `EXPECT`, `SAVE`, `WAIT`, `SET`
+- Request: `REQUEST`, `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`, `BODY`/`DATA`, `FILE`, `GRAPHQL`, `HEADER`/`HEADERS`, `QUERY`, `PARAM`, `AUTH`, `EXPECT`, `SAVE`, `WAIT`, `SET`
+
+HTTP `OPTIONS` is written as `REQUEST: OPTIONS /path` so it does not collide with suite-level `OPTIONS: {...}` JSON. `HEAD: /x` is a request alias like `GET:`.
 
 `SETUP` / `TEARDOWN` name another `TEST`. Those helper tests are not run as standalone cases.
 
@@ -156,11 +163,22 @@ EXPECT: HEADER Content-Type CONTAINS json
 
 `AUTH: bearer ${TOKEN}` sets `Authorization: Bearer ${TOKEN}`. Explicit `HEADER` lines still work.
 
-`AUTH: oauth2 grant=client_credentials token_url=... client_id=...` and `grant=password username=... password=...` fetch a token (cached). If the token response includes `refresh_token`, a 401 retries once after refresh. Browser PKCE is not implemented.
+`AUTH: oauth2 grant=client_credentials token_url=... client_id=...` and `grant=password username=... password=...` fetch a token (cached). If the token response includes `refresh_token`, a 401 retries once after refresh.
+
+`AUTH: oauth2 grant=authorization_code token_url=... auth_url=... client_id=... redirect_uri=... code=${AUTH_CODE} pkce=true` exchanges an authorization code. SnapAPI does not open a browser; supply `${AUTH_CODE}` from the environment. With `pkce=true` the token request includes S256 `code_verifier` / `code_challenge` fields.
+
+`AUTH: digest user:pass` uses `requests` HTTP Digest Auth.
 
 `QUERY: page=2&limit=10` and `PARAM: page 2` attach query parameters to the current request (they merge with any query string already in the path).
 
-`OPTIONS: {"OPENAPI": "spec.yaml"}` validates JSON responses against the matching path+method response schema when present. `EXPECT: openapi ./spec.yaml` does the same for one step. Partial path match (`/users/{id}` vs `/users/1`) is allowed; missing schemas are skipped.
+`OPTIONS: {"OPENAPI": "spec.yaml"}` validates JSON responses (and request bodies/required params) against the matching path+method schema when present. Missing path/schema is skipped by default. Strict mode fails instead:
+
+```
+OPTIONS: {"OPENAPI": "spec.yaml", "OPENAPI-STRICT": true}
+EXPECT: openapi ./spec.yaml strict
+```
+
+CLI `--contract-strict` is the same switch. Partial path match (`/users/{id}` vs `/users/1`) is allowed.
 
 ### Checks
 
@@ -174,12 +192,16 @@ EXPECT: body contains userId
 EXPECT: body not contains stack
 EXPECT: json $.email matches ^.+@example\\.com$
 EXPECT: json $.items length == 3
-EXPECT: json $.score > 0
-EXPECT: json $.tags contains "admin"
+EXPECT: json $.items[*].id contains 3
+EXPECT: json $.items[?(@.status=="open")].id contains 3
+EXPECT: json $.tags contains-all ["a","b"]
+EXPECT: json $.items each $.status == "active"
 EXPECT: schema ./schemas/user.json
 EXPECT: duration < 200ms
 EXPECT: header Content-Type contains json
 EXPECT: openapi ./openapi.yaml
+EXPECT: openapi ./openapi.yaml strict
+EXPECT: xpath //Order/@id == "1"
 ```
 
 Also accepted:
@@ -191,7 +213,9 @@ EXPECT: JSON $.data.email == "jane@example.com"
 EXPECT: HEADER Content-Type CONTAINS json
 ```
 
-JSONPath is a small subset: `$.a.b`, `$.items.0.id`, `$.items[0].id`, and `$.items[*].id`. Filter expressions such as `$[?(@.x==1)]` are not supported.
+JSONPath is a small subset: `$.a.b`, `$.items.0.id`, `$.items[0].id`, `$.items[*].id`, and equality filters `$.items[?(@.status=="open")]` / `$.items[?(@.id==1)]`.
+
+XPath uses stdlib `xml.etree` (descendant tags and `/@attr`). Axes, namespaces, and functions are not implemented.
 
 ### Variables
 
@@ -203,9 +227,25 @@ Lookup order: process environment, then `--env` file, then `SET` / `SAVE` values
 
 `tests/recommended.snaptest` shows the current DSL against a local mock server (pytest injects `BASE_URL`). `tests/test_suite.snaptest` is a classic-syntax example against [reqres.in](https://reqres.in) and needs network access. Automated tests in `tests/test_*.py` use a local mock HTTP server and do not call reqres. CI replays `tests/fixtures/offline.snaptest` from a checked-in cassette.
 
-HTML reports include redacted request/response bodies. VCR cassette keys include method, sorted query string, `Content-Type`/`Accept`, and body. Replay restores `Set-Cookie` onto the session.
+HTML reports include redacted request/response bodies. VCR cassette keys include method, path, and (by default) sorted query string, `Content-Type`/`Accept`, and body. `OPTIONS: {"VCR-MATCH": ["query","body","accept","authorization"]}` or `--vcr-match authorization,query` replaces that default. Replay restores `Set-Cookie` onto the session.
 
-`snapapi mock tests/fixtures/mock.json --port 0` serves `{"routes":[{"method":"GET","path":"/ping","status":200,"json":{"ok":true}}]}`. There is no language server, gRPC, or WebSocket support.
+`snapapi mock tests/fixtures/mock.json --port 0` serves JSON routes. Routes may use path templates (`/users/{id}`), optional `match.query` / `match.body` subsets, and `delay_ms`. Exact paths win over templates. There is no language server, gRPC, or WebSocket support.
+
+### pytest plugin
+
+Install with `pip install -e ".[dev]"`. Then:
+
+```python
+def test_suite(snapapi_run):
+    result = snapapi_run("tests/foo.snaptest")
+    assert result.ok
+
+@pytest.mark.snapapi("tests/foo.snaptest")
+def test_marked(snapapi_run, request):
+    snapapi_run(request.node.get_closest_marker("snapapi").args[0])
+```
+
+`snapapi_run(path, **engine_kwargs)` returns `SuiteResult` and fails the pytest case when the suite is not ok.
 
 ## Project layout
 
@@ -230,7 +270,7 @@ pytest
 
 ## VS Code
 
-The `snapapi-language` extension is a language pack for `.snaptest` files: syntax highlighting, snippets, completions, lightweight diagnostics, and **SnapAPI: Run current file** / **Run test at cursor**. See [snapapi-language/README.md](snapapi-language/README.md).
+The `snapapi-language` extension is a language pack for `.snaptest` files: syntax highlighting, snippets, completions, lightweight diagnostics (unknown keywords, unknown SETUP names, `HEAD:` / `REQUEST: OPTIONS`), and **SnapAPI: Run current file** / **Run test at cursor**. See [snapapi-language/README.md](snapapi-language/README.md). There is no separate language-server process.
 
 ## License
 

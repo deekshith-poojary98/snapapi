@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import time
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from snapapi.exceptions import SnapAPIError
+from snapapi.openapi import _path_matches
 
 
 def load_mock_routes(path):
@@ -37,6 +39,8 @@ def load_mock_routes(path):
                 "json": item.get("json"),
                 "body": item.get("body"),
                 "headers": dict(item.get("headers") or {}),
+                "match": item.get("match") if isinstance(item.get("match"), dict) else {},
+                "delay_ms": int(item.get("delay_ms") or 0),
             }
         )
     return parsed
@@ -69,11 +73,23 @@ class MockServer:
             self._thread.join(timeout=2)
         self._httpd.server_close()
 
-    def match(self, method, path):
+    def match(self, method, path, query="", body=None):
+        method = (method or "").upper()
+        candidates = []
         for route in self.routes:
-            if route["method"] == method.upper() and route["path"] == path:
-                return route
-        return None
+            if route["method"] != method:
+                continue
+            exact = route["path"] == path
+            templated = (not exact) and _path_matches(route["path"], path)
+            if not exact and not templated:
+                continue
+            if not _constraints_match(route.get("match") or {}, query, body):
+                continue
+            candidates.append((0 if exact else 1, route))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[0])
+        return candidates[0][1]
 
     def __enter__(self):
         return self.start()
@@ -85,6 +101,39 @@ class MockServer:
 
 def start_mock(path, host="127.0.0.1", port=8765):
     return MockServer(load_mock_routes(path), host=host, port=port).start()
+
+
+def _constraints_match(match, query, body):
+    if not match:
+        return True
+    expected_query = match.get("query")
+    if expected_query:
+        actual_query = dict(parse_qsl(query or "", keep_blank_values=True))
+        if not _subset_match(expected_query, actual_query):
+            return False
+    expected_body = match.get("body")
+    if expected_body is not None:
+        actual_body = body
+        if isinstance(expected_body, dict) and isinstance(body, str):
+            try:
+                actual_body = json.loads(body) if body else {}
+            except json.JSONDecodeError:
+                return False
+        if not _subset_match(expected_body, actual_body):
+            return False
+    return True
+
+
+def _subset_match(expected, actual):
+    if isinstance(expected, dict):
+        if not isinstance(actual, dict):
+            return False
+        return all(key in actual and _subset_match(value, actual[key]) for key, value in expected.items())
+    if isinstance(expected, list):
+        if not isinstance(actual, list):
+            return False
+        return expected == actual
+    return str(expected) == str(actual) if not isinstance(expected, bool) else expected == actual
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -108,15 +157,30 @@ class _Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self._dispatch("DELETE")
 
+    def do_HEAD(self):
+        self._dispatch("HEAD")
+
+    def do_OPTIONS(self):
+        self._dispatch("OPTIONS")
+
     def _dispatch(self, method):
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length", "0") or 0)
-        if length:
-            self.rfile.read(length)
-        route = self.server.router.match(method, parsed.path)
+        raw = self.rfile.read(length) if length else b""
+        payload = None
+        text = raw.decode("utf-8") if raw else ""
+        if text:
+            try:
+                payload = json.loads(text)
+            except json.JSONDecodeError:
+                payload = text
+        route = self.server.router.match(method, parsed.path, query=parsed.query, body=payload)
         if route is None:
             self._respond(404, {"Content-Type": "application/json"}, {"error": "not found", "path": parsed.path})
             return
+        delay_ms = int(route.get("delay_ms") or 0)
+        if delay_ms > 0:
+            time.sleep(delay_ms / 1000.0)
         headers = dict(route.get("headers") or {})
         body = route.get("json") if route.get("json") is not None else route.get("body")
         self._respond(route["status"], headers, body)

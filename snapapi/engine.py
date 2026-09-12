@@ -6,6 +6,9 @@ import re
 import sys
 import threading
 import time
+import base64
+import hashlib
+import secrets
 from concurrent.futures import FIRST_COMPLETED, CancelledError, ThreadPoolExecutor, wait
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,12 +16,13 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 from colorama import Fore, Style, init
+from requests.auth import HTTPDigestAuth
 
 from snapapi.api_client import APIClient, open_files
-from snapapi.cassette import cassette_key, load_cassettes, save_cassette
-from snapapi.exceptions import JsonPathError, SnapAPIError
-from snapapi.openapi import load_spec, response_schema
-from snapapi import jsonpath
+from snapapi.cassette import cassette_key, load_cassettes, parse_vcr_match, save_cassette
+from snapapi.exceptions import JsonPathError, SnapAPIError, XPathError
+from snapapi.openapi import collect_parameters, load_spec, match_operation, request_body_schema, response_schema
+from snapapi import jsonpath, xpath
 from snapapi.redact import redact_body, redact_headers
 from snapapi.safety import assert_public_url
 from snapapi.variables import VAR_PATTERN, interpolate
@@ -195,6 +199,9 @@ class Engine:
         cert=None,
         proxies=None,
         record_on_miss=False,
+        contract_strict=None,
+        vcr_match=None,
+        reruns=None,
     ):
         self.suite = suite
         self.variables = dict(variables or {})
@@ -244,6 +251,12 @@ class Engine:
         self._last_duration = 0
         self._client = None
         self._openapi_spec = self._load_openapi_spec(options.get("OPENAPI"))
+        if contract_strict is None:
+            self.contract_strict = _as_bool(options.get("OPENAPI-STRICT"), False)
+        else:
+            self.contract_strict = bool(contract_strict)
+        self.vcr_match = parse_vcr_match(vcr_match if vcr_match is not None else options.get("VCR-MATCH"))
+        self.reruns = max(0, int(options.get("RERUNS") or 0) if reruns is None else int(reruns))
 
     def run(self):
         started = time.perf_counter()
@@ -363,7 +376,26 @@ class Engine:
             snapshot = dict(self.variables)
             if row:
                 self.variables.update(row)
-            result = self._run_test(test["name"], role="test")
+            start_vars = dict(self.variables)
+            max_attempts = 1 + max(0, int(self.reruns or 0))
+            result = None
+            for attempt in range(max_attempts):
+                if attempt:
+                    self.variables = dict(start_vars)
+                result = self._run_test(
+                    test["name"],
+                    role="test",
+                    record=False,
+                    announce=(attempt == 0),
+                )
+                if result.status != "failed":
+                    if result.status == "passed":
+                        self._print_outcome(True, result.duration_ms)
+                        self.success.append(test["name"])
+                    break
+            else:
+                self._print_outcome(False, result.duration_ms)
+                self.failures.append((test["name"], result.error))
             if row:
                 label = next((value for value in row.values() if value), "row")
                 result.name = f"{test['name']} [{label}]"
@@ -487,6 +519,9 @@ class Engine:
             cert=self.cert,
             proxies=self.proxies,
             record_on_miss=self.record_on_miss,
+            contract_strict=self.contract_strict,
+            vcr_match=self.vcr_match,
+            reruns=self.reruns,
         )
         child._oauth_cache = self._oauth_cache
         child._cassettes = self._cassettes
@@ -497,7 +532,7 @@ class Engine:
         output = child.stream.getvalue() if child.stream else ""
         return results, output
 
-    def _run_test(self, name, role="test"):
+    def _run_test(self, name, role="test", record=True, announce=True):
         test = self.suite["test_map"][name]
         started = time.perf_counter()
         collected = []
@@ -510,7 +545,8 @@ class Engine:
         self._stack.append(name)
         try:
             self._apply_sets(test.get("sets"))
-            self._announce(test, role)
+            if announce:
+                self._announce(test, role)
             if test.get("setup"):
                 setup_result = self._run_test(test["setup"], role="setup")
                 collected.extend(setup_result.requests)
@@ -535,7 +571,7 @@ class Engine:
 
             duration_ms = (time.perf_counter() - started) * 1000
             if error:
-                if role == "test":
+                if role == "test" and record:
                     self._print_outcome(False, duration_ms)
                     self.failures.append((name, error))
                 return TestResult(
@@ -547,7 +583,7 @@ class Engine:
                     requests=collected,
                 )
 
-            if role == "test":
+            if role == "test" and record:
                 self._print_outcome(True, duration_ms)
                 self.success.append(name)
             return TestResult(
@@ -571,7 +607,10 @@ class Engine:
         self._client = client
         oauth = test.get("oauth2") or self.suite.get("oauth2")
         if oauth:
-            token = self._oauth_token(oauth)
+            try:
+                token = self._oauth_token(oauth)
+            except SnapAPIError as exc:
+                return False, str(exc), []
             test.setdefault("headers", {})
             test["headers"]["Authorization"] = f"Bearer {token}"
         requests_log = []
@@ -599,6 +638,13 @@ class Engine:
             headers = interpolate(headers, self.variables) if headers else {}
             if step.get("oauth2"):
                 headers["Authorization"] = f"Bearer {self._oauth_token(step['oauth2'])}"
+            digest = step.get("digest") or test.get("digest") or self.suite.get("digest")
+            auth = None
+            if digest:
+                auth = HTTPDigestAuth(
+                    interpolate(digest.get("username") or "", self.variables),
+                    interpolate(digest.get("password") or "", self.variables),
+                )
             files, handles = open_files(step.get("files"), self._base_dir())
         except SnapAPIError as exc:
             self._print_error(str(exc), under_request=False)
@@ -611,6 +657,17 @@ class Engine:
             except SnapAPIError as exc:
                 self._print_error(str(exc), under_request=False)
                 return False, str(exc), None
+        try:
+            self._validate_request_contracts(
+                method,
+                url_preview,
+                headers,
+                raw_body if raw_body is not None else data,
+                step.get("checks") or [],
+            )
+        except AssertionError as exc:
+            self._print_error(str(exc), under_request=False)
+            return False, str(exc), None
 
         checks = step.get("checks") or []
         wait = step.get("wait")
@@ -642,6 +699,7 @@ class Engine:
                         body_type=body_type,
                         content_type=step.get("content_type"),
                         follow_redirects=follow,
+                        auth=auth,
                     )
                     if (
                         getattr(response, "status_code", None) == 401
@@ -661,6 +719,7 @@ class Engine:
                             body_type=body_type,
                             content_type=step.get("content_type"),
                             follow_redirects=follow,
+                            auth=auth,
                         )
                     duration_ms = (time.perf_counter() - started) * 1000
                     self._last_duration = duration_ms
@@ -681,7 +740,9 @@ class Engine:
                     for check in checks:
                         self._execute_check(check, response, duration_ms, method, url)
                     if self._openapi_spec is not None:
-                        self._validate_openapi(self._openapi_spec, method, url, response)
+                        self._validate_openapi(
+                            self._openapi_spec, method, url, response, strict=self.contract_strict
+                        )
                     for save in step.get("saves") or []:
                         self._save_value(save, response)
                     return True, None, recorded
@@ -740,10 +801,11 @@ class Engine:
         body_type = kwargs.get("body_type")
         content_type = kwargs.get("content_type")
         follow = kwargs.get("follow_redirects")
+        auth = kwargs.get("auth")
         url = client._build_url(endpoint)
         body = raw_body if raw_body is not None else data
         if self.mode == "replay":
-            key = cassette_key(method, url, body, headers=headers)
+            key = cassette_key(method, url, body, headers=headers, match=self.vcr_match)
             record = self._cassettes.get(key)
             if not record:
                 if self.record_on_miss:
@@ -758,6 +820,7 @@ class Engine:
                         body_type=body_type,
                         content_type=content_type,
                         follow=follow,
+                        auth=auth,
                     )
                     self._store_cassette(key, method, url, response)
                     return response
@@ -774,9 +837,10 @@ class Engine:
             body_type=body_type,
             content_type=content_type,
             follow=follow,
+            auth=auth,
         )
         if self.mode == "record":
-            key = cassette_key(method, url, body, headers=headers)
+            key = cassette_key(method, url, body, headers=headers, match=self.vcr_match)
             self._store_cassette(key, method, url, response)
         return response
 
@@ -792,6 +856,7 @@ class Engine:
             body_type=kwargs.get("body_type"),
             content_type=kwargs.get("content_type"),
             follow_redirects=kwargs.get("follow"),
+            auth=kwargs.get("auth"),
         )
 
     def _store_cassette(self, key, method, url, response):
@@ -836,7 +901,10 @@ class Engine:
             spec = self._load_openapi_spec(check.get("path"))
             if spec is None:
                 raise AssertionError("EXPECT openapi requires a spec path")
-            self._validate_openapi(spec, method, url or getattr(response, "url", None), response)
+            strict = bool(check.get("strict")) or self.contract_strict
+            self._validate_openapi(spec, method, url or getattr(response, "url", None), response, strict=strict)
+        elif check_type == "XPATH":
+            self._check_xpath(check, response)
         else:
             raise AssertionError(f"Unknown check type {check_type}")
 
@@ -856,21 +924,61 @@ class Engine:
             cmp_op = operator.split(" ", 1)[1]
             self._compare(len(actual), cmp_op, expected, f"JSON {path} length")
             return
+        if operator.upper() == "EACH":
+            if not isinstance(actual, list):
+                raise AssertionError(f"JSON {path} each requires an array, got {type(actual).__name__}")
+            subpath = check.get("each_path") or "$"
+            if not str(subpath).startswith("$"):
+                subpath = "$." + str(subpath)
+            sub_op = check.get("each_operator") or "=="
+            for index, item in enumerate(actual):
+                try:
+                    item_value = jsonpath.extract(item, subpath)
+                except JsonPathError as exc:
+                    raise AssertionError(f"JSON {path}[{index}] {exc}") from exc
+                self._assert_json_value(item_value, sub_op, expected, f"JSON {path}[{index}] {subpath}")
+            return
+        if operator.upper() == "CONTAINS-ALL":
+            if not isinstance(actual, (list, tuple, set)):
+                raise AssertionError(f"JSON {path} contains-all requires an array, got {actual!r}")
+            missing = [item for item in _as_list(expected) if item not in actual]
+            assert not missing, f"JSON {path} value {actual!r} does not contain all of {expected!r} (missing {missing!r})"
+            return
+        self._assert_json_value(actual, operator, expected, f"JSON {path}")
+
+    def _assert_json_value(self, actual, operator, expected, label):
         if operator == "==":
-            assert actual == expected, f"JSON {path} expected {expected!r}, got {actual!r}"
+            assert actual == expected, f"{label} expected {expected!r}, got {actual!r}"
         elif operator == "!=":
-            assert actual != expected, f"JSON {path} expected not {expected!r}, got {actual!r}"
+            assert actual != expected, f"{label} expected not {expected!r}, got {actual!r}"
         elif operator.upper() == "CONTAINS":
             if isinstance(actual, (list, tuple, set)):
-                assert expected in actual, f"JSON {path} value {actual!r} does not contain {expected!r}"
+                assert expected in actual, f"{label} value {actual!r} does not contain {expected!r}"
             else:
-                assert str(expected) in str(actual), f"JSON {path} value {actual!r} does not contain {expected!r}"
+                assert str(expected) in str(actual), f"{label} value {actual!r} does not contain {expected!r}"
         elif operator.upper() == "MATCHES":
-            assert re.search(str(expected), str(actual)), f"JSON {path} value {actual!r} does not match {expected!r}"
+            assert re.search(str(expected), str(actual)), f"{label} value {actual!r} does not match {expected!r}"
         elif operator in (">", ">=", "<", "<="):
-            self._compare(actual, operator, expected, f"JSON {path}")
+            self._compare(actual, operator, expected, label)
         else:
             raise AssertionError(f"Unknown JSON operator {operator}")
+
+    def _check_xpath(self, check, response):
+        path = interpolate(check["path"], self.variables)
+        try:
+            actual = xpath.extract(_response_text(response), path)
+        except XPathError as exc:
+            raise AssertionError(str(exc)) from exc
+        expected = interpolate(check["value"], self.variables)
+        operator = check.get("operator") or "=="
+        if operator == "==":
+            assert actual == expected, f"XPath {path} expected {expected!r}, got {actual!r}"
+        elif operator == "!=":
+            assert actual != expected, f"XPath {path} expected not {expected!r}, got {actual!r}"
+        elif operator.upper() == "CONTAINS":
+            assert str(expected) in str(actual), f"XPath {path} value {actual!r} does not contain {expected!r}"
+        else:
+            raise AssertionError(f"Unknown XPath operator {operator}")
 
     def _check_header(self, check, response):
         name = interpolate(check["name"], self.variables)
@@ -983,6 +1091,25 @@ class Engine:
                 "username": username,
                 "password": interpolate(spec.get("password") or "", self.variables),
             }
+        elif grant in ("authorization_code", "authorization-code"):
+            code = interpolate(spec.get("code") or "", self.variables)
+            if not code:
+                raise SnapAPIError(
+                    "OAuth2 authorization_code requires code=${AUTH_CODE} "
+                    "(SnapAPI does not open a browser for PKCE)"
+                )
+            data = {
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": client_id,
+                "client_secret": secret,
+                "redirect_uri": interpolate(spec.get("redirect_uri") or "", self.variables),
+            }
+            if _as_bool(spec.get("pkce"), False):
+                verifier, challenge = _pkce_s256()
+                data["code_verifier"] = verifier
+                data["code_challenge"] = challenge
+                data["code_challenge_method"] = "S256"
         else:
             data = {
                 "grant_type": "client_credentials",
@@ -1032,12 +1159,90 @@ class Engine:
             path = Path(self._base_dir()) / path
         return load_spec(path)
 
-    def _validate_openapi(self, spec, method, url, response):
+    def _validate_request_contracts(self, method, url, headers, body, checks):
+        specs = []
+        if self._openapi_spec is not None:
+            specs.append((self._openapi_spec, self.contract_strict))
+        for check in checks or []:
+            if check.get("type") != "OPENAPI":
+                continue
+            spec = self._load_openapi_spec(check.get("path"))
+            if spec is None:
+                continue
+            specs.append((spec, bool(check.get("strict")) or self.contract_strict))
+        seen = set()
+        for spec, strict in specs:
+            marker = id(spec)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            self._validate_openapi_request(spec, method, url, headers, body, strict=strict)
+
+    def _validate_openapi_request(self, spec, method, url, headers, body, strict=None):
+        if spec is None:
+            return
+        fail = self.contract_strict if strict is None else bool(strict)
+        path = urlsplit(url or "").path or url or ""
+        op = match_operation(spec, method, path)
+        if op is None:
+            self._contract_issue(f"OpenAPI: unmatched path/method {method} {path}", fail)
+            return
+        params = collect_parameters(spec, method, path)
+        query = dict(parse_qsl(urlsplit(url or "").query, keep_blank_values=True))
+        header_map = {str(key).lower(): value for key, value in (headers or {}).items()}
+        for param in params:
+            if not isinstance(param, dict) or not param.get("required"):
+                continue
+            name = param.get("name")
+            if not name:
+                continue
+            location = param.get("in")
+            if location == "query" and str(name) not in query:
+                self._contract_issue(f"OpenAPI: missing required query parameter {name}", fail)
+            elif location == "header" and str(name).lower() not in header_map:
+                self._contract_issue(f"OpenAPI: missing required header {name}", fail)
+        schema, required = request_body_schema(spec, method, path)
+        if required and body is None:
+            self._contract_issue(f"OpenAPI: missing required request body for {method} {path}", fail)
+            return
+        if schema is None or body is None:
+            return
+        instance = body
+        if isinstance(body, (bytes, str)):
+            try:
+                instance = json.loads(body)
+            except (TypeError, ValueError):
+                self._contract_issue(f"OpenAPI: request body is not JSON for {method} {path}", fail)
+                return
+        try:
+            import jsonschema
+        except ImportError as exc:
+            raise AssertionError("jsonschema is required for OpenAPI request validation") from exc
+        try:
+            jsonschema.validate(instance, schema)
+        except jsonschema.ValidationError as exc:
+            self._contract_issue(f"OpenAPI request schema validation failed: {exc.message}", fail)
+
+    def _contract_issue(self, message, fail):
+        if fail:
+            raise AssertionError(message)
+        self._print(self._paint(f"{self._spaces(1)}warning: {message}", Fore.YELLOW))
+
+    def _validate_openapi(self, spec, method, url, response, strict=None):
         if response is None:
             return
+        fail = self.contract_strict if strict is None else bool(strict)
         path = urlsplit(url or "").path or url or ""
+        op = match_operation(spec, method, path)
+        if op is None:
+            self._contract_issue(f"OpenAPI: unmatched path/method {method} {path}", fail)
+            return
         schema = response_schema(spec, method, path, getattr(response, "status_code", None))
         if schema is None:
+            self._contract_issue(
+                f"OpenAPI: missing response schema for {method} {path} {getattr(response, 'status_code', '')}",
+                fail,
+            )
             return
         try:
             import jsonschema
@@ -1227,6 +1432,19 @@ class Engine:
         if source and source != "<string>":
             return str(Path(source).parent)
         return str(Path.cwd())
+
+
+def _as_list(value):
+    if isinstance(value, (list, tuple, set)):
+        return list(value)
+    return [value]
+
+
+def _pkce_s256():
+    verifier = secrets.token_urlsafe(32)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
 
 
 def merge_query(endpoint, params):

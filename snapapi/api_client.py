@@ -43,6 +43,7 @@ class APIClient:
         raw=None,
         content_type=None,
         follow_redirects=None,
+        auth=None,
     ):
         url = self._build_url(endpoint)
         kwargs = {
@@ -50,6 +51,8 @@ class APIClient:
             "timeout": self.timeout if timeout is None else timeout,
             "allow_redirects": self.follow_redirects if follow_redirects is None else follow_redirects,
         }
+        if auth is not None:
+            kwargs["auth"] = auth
         kind = (body_type or "json").lower()
         if files:
             kwargs["files"] = files
@@ -89,6 +92,12 @@ class APIClient:
     def delete(self, endpoint, data=None, headers=None, timeout=None, **kwargs):
         body = kwargs["json"] if "json" in kwargs else data
         return self.request("DELETE", endpoint, json=body, headers=headers, timeout=timeout)
+
+    def head(self, endpoint, headers=None, timeout=None, **kwargs):
+        return self.request("HEAD", endpoint, headers=headers, timeout=timeout, **kwargs)
+
+    def options(self, endpoint, headers=None, timeout=None, **kwargs):
+        return self.request("OPTIONS", endpoint, headers=headers, timeout=timeout, **kwargs)
 
     def _build_url(self, endpoint):
         endpoint = (endpoint or "").strip()

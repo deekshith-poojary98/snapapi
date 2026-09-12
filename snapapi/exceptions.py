@@ -16,3 +16,7 @@ class ParseError(SnapAPIError):
 
 class JsonPathError(SnapAPIError):
     """Raised when a JSONPath-lite expression cannot be resolved."""
+
+
+class XPathError(SnapAPIError):
+    """Raised when an XPath-lite expression cannot be resolved."""

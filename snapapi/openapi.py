@@ -6,7 +6,7 @@ from pathlib import Path
 
 from snapapi.exceptions import SnapAPIError
 
-HTTP_METHODS = ("get", "post", "put", "patch", "delete")
+HTTP_METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
 PATH_PARAM_RE = re.compile(r"\{[^}]+\}")
 
 
@@ -73,13 +73,18 @@ def load_spec(path):
 
 
 def match_operation(spec, method, url_path):
+    _template, _item, op = match_path_item(spec, method, url_path)
+    return op
+
+
+def match_path_item(spec, method, url_path):
     paths = spec.get("paths") or {}
     method = (method or "").lower()
     exact = paths.get(url_path)
     if isinstance(exact, dict):
         op = exact.get(method) or exact.get(method.upper())
         if isinstance(op, dict):
-            return op
+            return url_path, exact, op
     for template, ops in paths.items():
         if not isinstance(ops, dict):
             continue
@@ -87,8 +92,8 @@ def match_operation(spec, method, url_path):
             continue
         op = ops.get(method) or ops.get(method.upper())
         if isinstance(op, dict):
-            return op
-    return None
+            return template, ops, op
+    return None, None, None
 
 
 def response_schema(spec, method, url_path, status_code):
@@ -105,6 +110,38 @@ def response_schema(spec, method, url_path, status_code):
     if schema is None:
         return None
     return resolve_ref(spec, schema)
+
+
+def request_body_schema(spec, method, url_path):
+    op = match_operation(spec, method, url_path)
+    if not op:
+        return None, False
+    body = op.get("requestBody") or {}
+    if not isinstance(body, dict):
+        return None, False
+    body = resolve_ref(spec, body)
+    required = bool(body.get("required"))
+    content = body.get("content") or {}
+    json_content = content.get("application/json") or next(iter(content.values()), {}) or {}
+    if not isinstance(json_content, dict):
+        return None, required
+    schema = json_content.get("schema")
+    if schema is None:
+        return None, required
+    return resolve_ref(spec, schema), required
+
+
+def collect_parameters(spec, method, url_path):
+    _template, path_item, op = match_path_item(spec, method, url_path)
+    if op is None:
+        return []
+    params = []
+    for source in (path_item, op):
+        for param in (source or {}).get("parameters") or []:
+            if not isinstance(param, dict):
+                continue
+            params.append(resolve_ref(spec, param))
+    return params
 
 
 def resolve_ref(spec, node):

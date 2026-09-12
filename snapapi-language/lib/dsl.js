@@ -1,7 +1,8 @@
 "use strict";
 
-const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"];
 const HTTP_METHOD_SET = new Set(HTTP_METHODS);
+const REQUEST_METHODS = new Set([...HTTP_METHODS, "OPTIONS"]);
 const KNOWN_KEYWORDS = new Set([
     "SUITE",
     "DESC",
@@ -61,12 +62,13 @@ const KEYWORD_COMPLETIONS = [
     { label: "ONLY", detail: "Run only this test" },
     { label: "QUARANTINE", detail: "Quarantine this test" },
     { label: "EXAMPLES", detail: "CSV rows that expand into tests" },
-    { label: "REQUEST", detail: "METHOD /path (legacy)" },
+    { label: "REQUEST", detail: "METHOD /path (use REQUEST: OPTIONS /path for HTTP OPTIONS)" },
     { label: "GET", detail: "GET request" },
     { label: "POST", detail: "POST request" },
     { label: "PUT", detail: "PUT request" },
     { label: "PATCH", detail: "PATCH request" },
     { label: "DELETE", detail: "DELETE request" },
+    { label: "HEAD", detail: "HEAD request" },
     { label: "BODY", detail: "JSON, form, or raw body" },
     { label: "DATA", detail: "JSON body (legacy alias of BODY)" },
     { label: "FILE", detail: "Multipart file field FROM path" },
@@ -300,6 +302,7 @@ function analyze(text, options = {}) {
     const testNames = new Set([...collectTestNames(text), ...extraTestNames]);
     const seenTests = new Set();
     const checkImport = options.checkImport;
+    let inTest = false;
 
     const push = (event, message, range) => {
         const span = range || keywordIndex(event.text, event.keyword || "");
@@ -329,6 +332,7 @@ function analyze(text, options = {}) {
                 return;
             }
             if (event.keyword === "TEST") {
+                inTest = true;
                 if (!event.rest) {
                     push(event, "TEST name is required");
                 } else if (seenTests.has(event.rest)) {
@@ -336,6 +340,8 @@ function analyze(text, options = {}) {
                 } else {
                     seenTests.add(event.rest);
                 }
+            } else if (event.keyword === "SUITE") {
+                inTest = false;
             } else if (
                 event.keyword === "SETUP" ||
                 event.keyword === "TEARDOWN" ||
@@ -349,11 +355,17 @@ function analyze(text, options = {}) {
                         restIndex(event.text, event.keyword === "SUITE-SETUP" || event.keyword === "SUITE-TEARDOWN" ? "SUITE" : event.keyword),
                     );
                 }
+            } else if (event.keyword === "OPTIONS" && inTest) {
+                push(
+                    event,
+                    "OPTIONS at suite level is JSON config; use REQUEST: OPTIONS /path for the HTTP method",
+                    restIndex(event.text, "OPTIONS"),
+                );
             } else if (event.keyword === "REQUEST") {
                 const parts = event.rest.split(/\s+/, 2);
                 if (parts.length !== 2 || !parts[0] || !parts[1]) {
                     push(event, "REQUEST must be in the form: METHOD /path", restIndex(event.text, "REQUEST"));
-                } else if (!HTTP_METHOD_SET.has(parts[0].toUpperCase())) {
+                } else if (!REQUEST_METHODS.has(parts[0].toUpperCase())) {
                     push(event, `Unknown HTTP method '${parts[0].toUpperCase()}'`, restIndex(event.text, "REQUEST"));
                 }
             } else if (HTTP_METHOD_SET.has(event.keyword) && !event.rest) {
@@ -397,6 +409,7 @@ function analyze(text, options = {}) {
 module.exports = {
     AUTH_SCHEMES,
     HTTP_METHODS,
+    REQUEST_METHODS,
     KEYWORD_COMPLETIONS,
     KNOWN_KEYWORDS,
     analyze,
