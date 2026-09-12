@@ -24,6 +24,7 @@ def write_junit_report(payload, path):
         name="snapapi",
         tests=str(payload.get("total", 0)),
         failures=str(payload.get("failed", 0)),
+        errors=str(sum(1 for suite in payload.get("suites", []) if suite.get("error"))),
         skipped=str(payload.get("skipped", 0)),
         time=_seconds(payload.get("duration_ms", 0)),
     )
@@ -34,11 +35,19 @@ def write_junit_report(payload, path):
             name=suite.get("name") or "suite",
             tests=str(suite.get("total", 0)),
             failures=str(suite.get("failed", 0)),
+            errors="1" if suite.get("error") else "0",
             skipped=str(suite.get("skipped", 0)),
             time=_seconds(suite.get("duration_ms", 0)),
         )
         if suite.get("source"):
             suite_el.set("file", str(suite["source"]))
+        if suite.get("error"):
+            error_el = ET.SubElement(
+                suite_el,
+                "error",
+                message=_xml_text(suite.get("error_name") or "SUITE-SETUP"),
+            )
+            error_el.text = _xml_text(suite["error"])
         for test in suite.get("tests", []):
             case = ET.SubElement(
                 suite_el,
@@ -71,7 +80,7 @@ def _render_html_report(payload):
     failed = int(payload.get("failed") or 0)
     skipped = int(payload.get("skipped") or 0)
     total = int(payload.get("total") or (passed + failed + skipped))
-    outcome = "failed" if failed else "passed"
+    outcome = "failed" if not payload.get("ok", failed == 0) else "passed"
     generated = time.strftime("%Y-%m-%d %H:%M:%S")
     suites = "".join(_html_suite(suite) for suite in payload.get("suites") or [])
     if not suites:
@@ -501,7 +510,7 @@ def build_report_payload(suite_results):
     skipped = sum(item["skipped"] for item in suites)
     duration_ms = sum(item["duration_ms"] for item in suites)
     return {
-        "ok": failed == 0,
+        "ok": all(item.get("ok", item["failed"] == 0) for item in suites),
         "total": total,
         "passed": passed,
         "failed": failed,

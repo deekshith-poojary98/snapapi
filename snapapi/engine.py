@@ -141,14 +141,18 @@ class TestResult:
 
 
 class SuiteResult:
-    def __init__(self, name, source=None, tests=None, duration_ms=0):
+    def __init__(self, name, source=None, tests=None, duration_ms=0, error=None, error_name=None):
         self.name = name
         self.source = source
         self.tests = list(tests or [])
         self.duration_ms = duration_ms
+        self.error = error
+        self.error_name = error_name
 
     @property
     def ok(self):
+        if self.error:
+            return False
         return all(test.status != "failed" for test in self.tests)
 
     @property
@@ -168,9 +172,10 @@ class SuiteResult:
         return len(self.tests)
 
     def to_dict(self):
-        return {
+        payload = {
             "name": self.name,
             "source": self.source,
+            "ok": self.ok,
             "total": self.total,
             "passed": self.passed,
             "failed": self.failed,
@@ -178,6 +183,10 @@ class SuiteResult:
             "duration_ms": round(self.duration_ms, 3),
             "tests": [test.to_dict() for test in self.tests],
         }
+        if self.error:
+            payload["error"] = self.error
+            payload["error_name"] = self.error_name
+        return payload
 
 
 class Engine:
@@ -297,21 +306,16 @@ class Engine:
         if self.suite.get("setup"):
             setup_result = self._run_test(self.suite["setup"], role="setup")
             if setup_result.status == "failed":
-                results.append(
-                    TestResult(
-                        name=f"SUITE-SETUP ({self.suite['setup']})",
-                        status="failed",
-                        error=setup_result.error,
-                        requests=setup_result.requests,
-                        duration_ms=setup_result.duration_ms,
-                    )
-                )
-                self._notify("end_test", self._suite_info(), results[-1])
+                setup_name = f"SUITE-SETUP ({self.suite['setup']})"
+                reason = f"suite setup {self.suite['setup']!r} failed"
+                results.extend(self._skip_primaries(reason))
                 suite_result = SuiteResult(
                     name=self.suite.get("name"),
                     source=self.suite.get("source"),
                     tests=results,
                     duration_ms=(time.perf_counter() - started) * 1000,
+                    error=setup_result.error or "failed",
+                    error_name=setup_name,
                 )
                 self.print_summary(suite_result)
                 self._notify("end_suite", suite_result)
@@ -403,6 +407,8 @@ class Engine:
             skipped_tests = suite_result.skipped
             duration = suite_result.duration_ms
             failed_rows = [(item.name, item.error) for item in suite_result.tests if item.status == "failed"]
+            if suite_result.error:
+                failed_rows.insert(0, (suite_result.error_name or "SUITE-SETUP", suite_result.error))
         parts = [
             self._paint(f"{passed_tests} passed", Fore.GREEN if passed_tests else Style.DIM),
             self._paint(f"{failed_tests} failed", Fore.RED if failed_tests else Style.DIM),
@@ -635,9 +641,12 @@ class Engine:
 
             duration_ms = (time.perf_counter() - started) * 1000
             if error:
-                if role == "test" and record:
-                    self._print_outcome(False, duration_ms)
-                    self.failures.append((name, error))
+                if record:
+                    if role == "test":
+                        self._print_outcome(False, duration_ms)
+                        self.failures.append((name, error))
+                    elif announce:
+                        self._print_outcome(False, duration_ms)
                 return TestResult(
                     name=name,
                     tags=test.get("tags") or [],
@@ -1485,6 +1494,15 @@ class Engine:
             self._dep_status[name] = "passed"
         else:
             self._dep_status[name] = "skipped"
+
+    def _skip_primaries(self, reason):
+        results = []
+        for test in self._primary_tests():
+            self._print_skip(test, reason)
+            item = TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped", error=reason)
+            results.append(item)
+            self._notify("end_test", self._suite_info(), item)
+        return results
 
     def _print_skip(self, test, reason):
         if self.verbosity < 1:

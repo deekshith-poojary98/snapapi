@@ -223,6 +223,43 @@ TEST: Me
     assert "setup Authenticate" in output
 
 
+def test_suite_setup_failure_is_not_a_failed_test(http_server):
+    http_server.on("POST", "/login", status=401, json={"ok": False})
+    http_server.on("GET", "/me", json={"ok": True})
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Authenticate
+  POST: /login
+  EXPECT: status == 200
+SUITE-SETUP: Authenticate
+TEST: Me
+  GET: /me
+  EXPECT: status == 200
+TEST: Profile
+  GET: /me
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.failed == 0
+    assert result.passed == 0
+    assert result.skipped == 2
+    assert [test.name for test in result.tests] == ["Me", "Profile"]
+    assert all(test.status == "skipped" for test in result.tests)
+    assert "suite setup 'Authenticate' failed" in result.tests[0].error
+    assert result.error_name == "SUITE-SETUP (Authenticate)"
+    assert "Status code expected 200, got 401" in (result.error or "")
+    assert result.total == 2
+    assert "0 passed" in output
+    assert "0 failed" in output
+    assert "2 skipped" in output
+    assert "SUITE-SETUP (Authenticate)" in output
+    assert [item["path"] for item in http_server.requests] == ["/login"]
+
+
 def test_depends_skips_when_upstream_fails(http_server):
     http_server.on("GET", "/create", status=500, json={})
     http_server.on("GET", "/get", json={"ok": True})

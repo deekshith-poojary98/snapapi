@@ -186,6 +186,29 @@ TEST: List
   assert(/setup Seed/.test(result.text), "should announce setup Seed");
 }
 
+async function testSuiteSetupFailure() {
+  const result = await pg.runText(`
+SUITE: Setup fail
+URL: mock://
+HELPER: Seed
+  GET: /health
+  EXPECT: status == 201
+SUITE-SETUP: Seed
+TEST: List
+  GET: /api/users
+  EXPECT: status == 200
+TEST: Other
+  GET: /health
+  EXPECT: status == 200
+`);
+  assert(!result.ok, "suite should not be ok");
+  assert(result.failed === 0, "setup must not count as a failed test, failed=" + result.failed);
+  assert(result.passed === 0, "passed=" + result.passed);
+  assert(result.skipped === 2, "skipped=" + result.skipped);
+  assert(/0 passed/.test(result.text) && /0 failed/.test(result.text) && /2 skipped/.test(result.text), result.text);
+  assert(/SUITE-SETUP \(Seed\)/.test(result.text), result.text);
+}
+
 async function main() {
   await testList();
   await testCreateSave();
@@ -199,6 +222,7 @@ async function main() {
   await testExpectBool();
   await testDepends();
   await testHelper();
+  await testSuiteSetupFailure();
   console.log("playground interpreter ok");
 }
 

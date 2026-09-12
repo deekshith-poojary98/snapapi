@@ -31,7 +31,8 @@ def snapapi_run():
         result = engine.run()
         if not result.ok:
             failed = [item for item in result.tests if item.status == "failed"]
-            details = "; ".join(f"{item.name}: {item.error}" for item in failed) or "suite failed"
+            details = "; ".join(f"{item.name}: {item.error}" for item in failed)
+            details = details or result.error or "suite failed"
             pytest.fail(f"SnapAPI suite failed ({result.failed} failed): {details}")
         return result
 

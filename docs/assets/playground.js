@@ -1537,18 +1537,29 @@
       }
     }
 
+    var primaries = orderByDepends(suite.tests.filter(function (test) { return !helpers[test.name]; }));
     if (suite.setup) {
       var suiteSetup = await runTest(suite.setup, "setup", false);
       if (!suiteSetup.ok) {
-        failed += 1;
-        failures.push({ name: "SUITE-SETUP (" + suite.setup + ")", error: suiteSetup.error });
+        emit(indent(1) + "FAIL  " + formatDuration(suiteSetup.duration || 0), "fail");
+        var setupReason = "suite setup '" + suite.setup + "' failed";
+        primaries.forEach(function (test) {
+          emit("");
+          emit(indent(0) + test.name, "test");
+          emit(indent(1) + "SKIP  " + setupReason, "warn");
+          skipped += 1;
+        });
         emit("");
-        emit("  0 passed  1 failed  " + formatDuration(nowMs() - started), "fail");
-        return resultPayload();
+        var setupSummary = "  " + passed + " passed  " + failed + " failed";
+        if (skipped) setupSummary += "  " + skipped + " skipped";
+        setupSummary += "  " + formatDuration(nowMs() - started);
+        emit(setupSummary, "fail");
+        emit("  Failed:", "fail");
+        emit("    - SUITE-SETUP (" + suite.setup + "): " + (suiteSetup.error || "failed"), "fail");
+        return resultPayload(false);
       }
     }
 
-    var primaries = orderByDepends(suite.tests.filter(function (test) { return !helpers[test.name]; }));
     for (var p = 0; p < primaries.length; p++) {
       var test = primaries[p];
       var depReason = dependsReason(test, depStatus);
@@ -1604,9 +1615,9 @@
       });
     }
 
-    function resultPayload() {
+    function resultPayload(ok) {
       return {
-        ok: failed === 0,
+        ok: ok == null ? failed === 0 : !!ok,
         passed: passed,
         failed: failed,
         skipped: skipped,
