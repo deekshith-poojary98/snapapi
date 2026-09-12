@@ -41,6 +41,11 @@ test("flags unknown SETUP names", () => {
     assert.ok(findings.some((item) => /Unknown SETUP test 'Missing'/.test(item.message)));
 });
 
+test("flags unknown DEPENDS names", () => {
+    const findings = dsl.analyze("TEST: A\nDEPENDS: Missing\n  GET: /x\n");
+    assert.ok(findings.some((item) => /Unknown DEPENDS test 'Missing'/.test(item.message)));
+});
+
 test("accepts SETUP names from extraTestNames", () => {
     const findings = dsl.analyze("TEST: A\nSETUP: Imported\n  GET: /x\n", {
         extraTestNames: ["Imported"],
@@ -68,7 +73,7 @@ test("findTestNameAt walks up to the nearest TEST", () => {
 test("accepts current DSL keywords including FILE GRAPHQL EXAMPLES SKIP ONLY QUARANTINE", () => {
     const findings = dsl.analyze(`SUITE: Demo
 FOLLOW-REDIRECTS: false
-SUITE SETUP: Login
+SUITE-SETUP: Login
 TEST: Login
   POST: /login
   EXPECT: status == 200
@@ -97,9 +102,40 @@ EXAMPLES:
     assert.equal(findings.length, 0);
 });
 
-test("accepts SUITE SETUP two-word form", () => {
+test("accepts HELPER blocks for SUITE-SETUP", () => {
+    const findings = dsl.analyze(`HELPER: Login
+  POST: /login
+SUITE-SETUP: Login
+TEST: A
+  GET: /x
+`);
+    assert.equal(findings.length, 0);
+});
+
+test("flags DEPENDS on a HELPER", () => {
+    const findings = dsl.analyze(`HELPER: Login
+  POST: /login
+SUITE-SETUP: Login
+TEST: A
+DEPENDS: Login
+  GET: /x
+`);
+    assert.ok(findings.some((item) => /HELPER, not a primary TEST/.test(item.message)));
+});
+
+test("accepts SUITE-SETUP hyphenated form", () => {
+    const findings = dsl.analyze("SUITE-SETUP: Missing\nTEST: A\n  GET: /x\n");
+    assert.ok(findings.some((item) => /Unknown SUITE-SETUP test 'Missing'/.test(item.message)));
+});
+
+test("rejects space-separated keywords", () => {
     const findings = dsl.analyze("SUITE SETUP: Missing\nTEST: A\n  GET: /x\n");
-    assert.ok(findings.some((item) => /Unknown SUITE SETUP test 'Missing'/.test(item.message)));
+    assert.ok(findings.some((item) => /Keywords cannot contain spaces; use SUITE-SETUP/.test(item.message)));
+});
+
+test("suggests closest known keyword for spaced typos", () => {
+    const findings = dsl.analyze("FOLLO REDIRECTS: true\nTEST: A\n  GET: /x\n");
+    assert.ok(findings.some((item) => /did you mean FOLLOW-REDIRECTS/.test(item.message)));
 });
 
 test("BODY form is not treated as JSON", () => {

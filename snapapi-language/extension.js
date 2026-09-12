@@ -7,6 +7,12 @@ const vscode = require("vscode");
 const dsl = require("./lib/dsl");
 
 const LANGUAGE_ID = "snaptest";
+const SUITE_EXTENSIONS = [".sapi", ".snaptest"];
+
+function isSuiteFileName(fileName) {
+    const lower = String(fileName || "").toLowerCase();
+    return SUITE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
 const OUTPUT_NAME = "SnapAPI";
 
 let outputChannel;
@@ -191,7 +197,7 @@ function provideCompletionItems(document, position) {
     if (authMatch && !authMatch[1].trim()) {
         return schemeCompletions();
     }
-    const setupMatch = /^(SETUP|TEARDOWN):\s*(.*)$/.exec(trimmed);
+    const setupMatch = /^(SETUP|TEARDOWN|SUITE-SETUP|SUITE-TEARDOWN|DEPENDS):\s*(.*)$/.exec(trimmed);
     if (setupMatch) {
         return testNameCompletions(document, setupMatch[2]);
     }
@@ -219,6 +225,8 @@ function expectCompletions(rest) {
         ["body contains", "EXPECT: body contains ${1:text}"],
         ["json path", "EXPECT: json ${1:$.path} == ${2:\"value\"}"],
         ["header contains", "EXPECT: header ${1:Content-Type} contains ${2:json}"],
+        ["status OR", "EXPECT: status == ${1:400} OR status == ${2:401}"],
+        ["AND / OR group", "EXPECT: (status == ${1:400} OR status == ${2:401}) AND json ${3:$.success} == false"],
         ["STATUS 200", "EXPECT: STATUS ${1:200}"],
         ["CONTAINS", "EXPECT: CONTAINS ${1:text}"],
         ["RETRY", "EXPECT: status == ${1:200} RETRY ${2:5}"],
@@ -270,15 +278,15 @@ function methodCompletions(rest) {
 async function runActive({ atCursor }) {
     const editor = vscode.window.activeTextEditor;
     if (!editor) {
-        vscode.window.showWarningMessage("Open a .snaptest file to run SnapAPI.");
+        vscode.window.showWarningMessage("Open a .sapi file to run SnapAPI.");
         return;
     }
-    if (editor.document.languageId !== LANGUAGE_ID && !editor.document.fileName.endsWith(".snaptest")) {
-        vscode.window.showWarningMessage("SnapAPI can only run .snaptest files.");
+    if (editor.document.languageId !== LANGUAGE_ID && !isSuiteFileName(editor.document.fileName)) {
+        vscode.window.showWarningMessage("SnapAPI can only run .sapi files.");
         return;
     }
     if (editor.document.uri.scheme !== "file") {
-        vscode.window.showWarningMessage("Save the .snaptest file before running SnapAPI.");
+        vscode.window.showWarningMessage("Save the .sapi file before running SnapAPI.");
         return;
     }
     await editor.document.save();

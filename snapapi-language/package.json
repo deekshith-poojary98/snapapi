@@ -1,7 +1,7 @@
 {
   "name": "snapapi-language",
   "displayName": "SnapAPI",
-  "description": "Language pack for SnapAPI .snaptest files: highlighting, snippets, diagnostics, and run commands.",
+  "description": "Language pack for SnapAPI .sapi files: highlighting, snippets, diagnostics, and run commands.",
   "version": "0.1.0",
   "publisher": "deekshithpoojary",
   "license": "MIT",
@@ -44,6 +44,7 @@
           "snaptest"
         ],
         "extensions": [
+          ".sapi",
           ".snaptest"
         ],
         "configuration": "./language-configuration.json"

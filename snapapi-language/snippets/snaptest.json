@@ -5,13 +5,12 @@
             "SUITE: ${1:Suite name}",
             "DESC: ${2:Description}",
             "TIMEOUT: ${3:10}",
-            "STOP-ON-FAILURE: ${4:false}",
-            "URL: ${5:https://api.example.com}",
+            "URL: ${4:https://api.example.com}",
             "HEADER Content-Type: application/json",
             "",
-            "TEST: ${6:Example}",
-            "  GET: ${7:/path}",
-            "  EXPECT: status == ${8:200}",
+            "TEST: ${5:Example}",
+            "  GET: ${6:/path}",
+            "  EXPECT: status == ${7:200}",
             ""
         ],
         "description": "SnapAPI suite with a GET test"
@@ -92,6 +91,11 @@
         "body": "EXPECT: status == ${1:200} RETRY ${2:5}",
         "description": "EXPECT status with RETRY"
     },
+    "EXPECT AND/OR": {
+        "prefix": ["expect-or", "expect-and"],
+        "body": "EXPECT: status == ${1:400} OR status == ${2:401}",
+        "description": "EXPECT combined with OR"
+    },
     "SAVE": {
         "prefix": "SAVE",
         "body": "SAVE: ${1:name} FROM ${2:$.path}",
@@ -117,9 +121,26 @@
         "body": "PARAM: ${1:name} ${2:value}",
         "description": "Single query PARAM"
     },
+    "HELPER": {
+        "prefix": ["helper", "HELPER"],
+        "body": [
+            "HELPER: ${1:Authenticate}",
+            "  POST: ${2:/login}",
+            "  BODY: {\"email\": \"${3:\\${EMAIL\\}}\", \"password\": \"${4:\\${PASSWORD\\}}\"}",
+            "  EXPECT: status == ${5:200}",
+            "  SAVE: ${6:accessToken} FROM ${7:$.data.accessToken}",
+            ""
+        ],
+        "description": "Named helper for SUITE-SETUP / SETUP (not a test case)"
+    },
+    "DEPENDS": {
+        "prefix": "DEPENDS",
+        "body": "DEPENDS: ${1:Create User}",
+        "description": "Skip this test if named tests failed or skipped"
+    },
     "IMPORT": {
         "prefix": "IMPORT",
-        "body": "IMPORT: ${1:other.snaptest}",
+        "body": "IMPORT: ${1:other.sapi}",
         "description": "Import tests from another file"
     }
 }

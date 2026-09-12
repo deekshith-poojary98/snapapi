@@ -1,6 +1,6 @@
 # SnapAPI Language Support
 
-Editor support for [SnapAPI](https://github.com/Deekshith-07/snapapi) `.snaptest` files — the HTTP testing DSL.
+Editor support for [SnapAPI](https://github.com/Deekshith-07/snapapi) `.sapi` files — the HTTP testing DSL. The older `.snaptest` extension still works.
 
 ## Features
 
@@ -9,8 +9,8 @@ Editor support for [SnapAPI](https://github.com/Deekshith-07/snapapi) `.snaptest
 - `AUTH`, `QUERY`, `PARAM`, `HEADER`, `BODY`, `EXPECT`, `SAVE`
 - `${VAR}` interpolation, JSON bodies, URLs, and `//` comments
 - Snippets for a suite skeleton, GET/POST tests, EXPECT variants, SAVE, AUTH, HEADER, and QUERY
-- Keyword completions (and test-name completions after `SETUP:` / `TEARDOWN:`)
-- Lightweight diagnostics on edit/save: unknown keywords, missing request paths, unknown SETUP/TEARDOWN names (including cheap `IMPORT` resolution), `HEAD:` paths, and `REQUEST: OPTIONS /path` (suite `OPTIONS:` remains JSON config)
+- Keyword completions (and test-name completions after `SETUP:` / `TEARDOWN:` / `SUITE-SETUP:` / `SUITE-TEARDOWN:` / `DEPENDS:`)
+- Lightweight diagnostics on edit/save: unknown keywords, missing request paths, unknown SETUP/TEARDOWN/SUITE-SETUP names (including cheap `IMPORT` resolution), `HEAD:` paths, and `REQUEST: OPTIONS /path` (suite `OPTIONS:` remains JSON config)
 - **SnapAPI: Run current file** and **SnapAPI: Run test at cursor** (uses `snapapi --name`)
 - Status bar + **SnapAPI** output channel for CLI results
 
@@ -22,7 +22,7 @@ Keywords follow the Python parser. Random English words are not highlighted; ass
 
 1. Open the `snapapi-language` folder in VS Code / Cursor.
 2. Press **F5** to launch an Extension Development Host.
-3. Open a `.snaptest` file.
+3. Open a `.sapi` file.
 
 If the workspace is the SnapAPI repo root, set the launch argument to `--extensionDevelopmentPath=${workspaceFolder}/snapapi-language`.
 
@@ -69,7 +69,7 @@ Example for a repo with a virtualenv:
 | SnapAPI: Run current file | Save and run `snapapi <file>` |
 | SnapAPI: Run test at cursor | Save and run `snapapi --name "<TEST>" <file>` using the nearest `TEST:` above the cursor |
 
-Both write to the **SnapAPI** output channel. The status bar shows the last result while a `.snaptest` file is active.
+Both write to the **SnapAPI** output channel. The status bar shows the last result while a `.sapi` file is active.
 
 ## Requirements
 

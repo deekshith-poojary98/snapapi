@@ -9,14 +9,15 @@ const KNOWN_KEYWORDS = new Set([
     "URL",
     "OPTIONS",
     "TIMEOUT",
-    "STOP-ON-FAILURE",
     "FOLLOW-REDIRECTS",
     "SUITE-SETUP",
     "SUITE-TEARDOWN",
     "TEST",
+    "HELPER",
     "TAG",
     "SETUP",
     "TEARDOWN",
+    "DEPENDS",
     "REQUEST",
     "DATA",
     "BODY",
@@ -42,22 +43,24 @@ const JSON_VALUE_KEYWORDS = new Set(["OPTIONS", "DATA", "BODY", "HEADERS", "GRAP
 const AUTH_SCHEMES = ["bearer", "basic", "digest", "token", "oauth2"];
 const LINE_KEYWORD_RE = /^([A-Z][A-Z0-9_-]*):(.*)$/;
 const HEADER_LINE_RE = /^HEADER\s+(\S+)\s*:\s*(.*)$/;
-const SUITE_HOOK_RE = /^SUITE\s+(SETUP|TEARDOWN):\s*(.*)$/i;
+const SPACED_KEYWORD_RE = /^([A-Z][A-Z0-9_-]*(?:\s+[A-Z][A-Z0-9_-]*)+)\s*:(.*)$/;
 
 const KEYWORD_COMPLETIONS = [
     { label: "SUITE", detail: "Suite name" },
     { label: "DESC", detail: "Suite or test description" },
     { label: "URL", detail: "Base URL" },
     { label: "TIMEOUT", detail: "HTTP timeout in seconds" },
-    { label: "STOP-ON-FAILURE", detail: "Stop the suite on the first failure" },
     { label: "FOLLOW-REDIRECTS", detail: "Follow HTTP redirects" },
-    { label: "SUITE SETUP", detail: "Run a helper TEST before the suite" },
+    { label: "SUITE-SETUP", detail: "Run a HELPER or TEST before the suite" },
+    { label: "SUITE-TEARDOWN", detail: "Run a HELPER or TEST after the suite" },
     { label: "OPTIONS", detail: "Suite options JSON (legacy)" },
-    { label: "IMPORT", detail: "Pull tests from another .snaptest file" },
-    { label: "TEST", detail: "Start a test" },
+    { label: "IMPORT", detail: "Pull tests from another .sapi file" },
+    { label: "TEST", detail: "Start a test case" },
+    { label: "HELPER", detail: "Named procedure for SETUP / SUITE-SETUP (not a test case)" },
     { label: "TAG", detail: "Tags for the current test" },
-    { label: "SETUP", detail: "Run another TEST first" },
-    { label: "TEARDOWN", detail: "Run another TEST after" },
+    { label: "SETUP", detail: "Run a HELPER or TEST first" },
+    { label: "TEARDOWN", detail: "Run a HELPER or TEST after" },
+    { label: "DEPENDS", detail: "Skip this test if named tests failed or skipped" },
     { label: "SKIP", detail: "Skip this test" },
     { label: "ONLY", detail: "Run only this test" },
     { label: "QUARANTINE", detail: "Quarantine this test" },
@@ -129,14 +132,6 @@ function isCommentOrBlank(stripped) {
 }
 
 function splitKeyword(stripped) {
-    const hook = SUITE_HOOK_RE.exec(stripped);
-    if (hook) {
-        return {
-            keyword: `SUITE-${hook[1].toUpperCase()}`,
-            rest: hook[2].trim(),
-            form: "suite-hook",
-        };
-    }
     const match = LINE_KEYWORD_RE.exec(stripped);
     if (match) {
         return { keyword: match[1], rest: match[2].trim(), form: "colon" };
@@ -149,7 +144,80 @@ function splitKeyword(stripped) {
             form: "header-line",
         };
     }
+    const spaced = SPACED_KEYWORD_RE.exec(stripped);
+    if (spaced) {
+        return {
+            keyword: spaced[1],
+            rest: spaced[2].trim(),
+            form: "spaced",
+        };
+    }
     return null;
+}
+
+function compactKeyword(raw) {
+    return String(raw).trim().split(/[\s_]+/).filter(Boolean).join("-");
+}
+
+function levenshtein(a, b) {
+    const rows = a.length + 1;
+    const cols = b.length + 1;
+    const matrix = Array.from({ length: rows }, () => new Array(cols));
+    for (let i = 0; i < rows; i += 1) {
+        matrix[i][0] = i;
+    }
+    for (let j = 0; j < cols; j += 1) {
+        matrix[0][j] = j;
+    }
+    for (let i = 1; i < rows; i += 1) {
+        for (let j = 1; j < cols; j += 1) {
+            const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+            matrix[i][j] = Math.min(
+                matrix[i - 1][j] + 1,
+                matrix[i][j - 1] + 1,
+                matrix[i - 1][j - 1] + cost,
+            );
+        }
+    }
+    return matrix[a.length][b.length];
+}
+
+function suggestKeyword(raw, known = KNOWN_KEYWORDS) {
+    const compacted = compactKeyword(raw);
+    if (known.has(compacted)) {
+        return compacted;
+    }
+    if (!/[-\s]/.test(raw)) {
+        return null;
+    }
+    let best = null;
+    let bestScore = 0;
+    for (const keyword of known) {
+        const maxLen = Math.max(compacted.length, keyword.length);
+        const score = maxLen ? 1 - levenshtein(compacted, keyword) / maxLen : 1;
+        if (score > bestScore) {
+            bestScore = score;
+            best = keyword;
+        }
+    }
+    return bestScore >= 0.7 ? best : null;
+}
+
+function unknownKeywordMessage(raw) {
+    const hint = suggestKeyword(raw);
+    if (/\s/.test(raw)) {
+        if (hint) {
+            if (hint === compactKeyword(raw)) {
+                return `Unknown keyword '${raw}'. Keywords cannot contain spaces; use ${hint}`;
+            }
+            return `Unknown keyword '${raw}'. Keywords cannot contain spaces; did you mean ${hint}?`;
+        }
+        return `Unknown keyword '${raw}'. Keywords cannot contain spaces`;
+    }
+    if (hint) {
+        return `Unknown keyword '${raw}'. Did you mean ${hint}?`;
+    }
+    return `Unknown keyword '${raw}'`;
 }
 
 function keywordIndex(lineText, keyword) {
@@ -255,8 +323,20 @@ function collectTestNames(text) {
     const names = [];
     walkLines(text, {
         onKeyword(event) {
-            if (event.keyword === "TEST" && event.rest) {
+            if ((event.keyword === "TEST" || event.keyword === "HELPER") && event.rest) {
                 names.push(event.rest);
+            }
+        },
+    });
+    return names;
+}
+
+function collectHelperNames(text) {
+    const names = new Set();
+    walkLines(text, {
+        onKeyword(event) {
+            if (event.keyword === "HELPER" && event.rest) {
+                names.add(event.rest);
             }
         },
     });
@@ -289,7 +369,7 @@ function findTestNameAt(text, lineNumber) {
             continue;
         }
         const parsed = splitKeyword(stripped);
-        if (parsed && parsed.keyword === "TEST" && parsed.rest) {
+        if (parsed && (parsed.keyword === "TEST" || parsed.keyword === "HELPER") && parsed.rest) {
             return { name: parsed.rest, line: i };
         }
     }
@@ -300,9 +380,11 @@ function analyze(text, options = {}) {
     const diagnostics = [];
     const extraTestNames = new Set(options.extraTestNames || []);
     const testNames = new Set([...collectTestNames(text), ...extraTestNames]);
+    const helperNames = collectHelperNames(text);
     const seenTests = new Set();
     const checkImport = options.checkImport;
     let inTest = false;
+    let currentKind = null;
 
     const push = (event, message, range) => {
         const span = range || keywordIndex(event.text, event.keyword || "");
@@ -327,21 +409,27 @@ function analyze(text, options = {}) {
             });
         },
         onKeyword(event) {
-            if (!KNOWN_KEYWORDS.has(event.keyword)) {
-                push(event, `Unknown keyword '${event.keyword}'`);
+            if (event.form === "spaced" || !KNOWN_KEYWORDS.has(event.keyword)) {
+                push(
+                    event,
+                    unknownKeywordMessage(event.keyword),
+                    keywordIndex(event.text, event.keyword),
+                );
                 return;
             }
-            if (event.keyword === "TEST") {
+            if (event.keyword === "TEST" || event.keyword === "HELPER") {
                 inTest = true;
+                currentKind = event.keyword === "HELPER" ? "helper" : "test";
                 if (!event.rest) {
-                    push(event, "TEST name is required");
+                    push(event, `${event.keyword} name is required`);
                 } else if (seenTests.has(event.rest)) {
-                    push(event, `Duplicate test name '${event.rest}'`, restIndex(event.text, "TEST"));
+                    push(event, `Duplicate name '${event.rest}'`, restIndex(event.text, event.keyword));
                 } else {
                     seenTests.add(event.rest);
                 }
             } else if (event.keyword === "SUITE") {
                 inTest = false;
+                currentKind = null;
             } else if (
                 event.keyword === "SETUP" ||
                 event.keyword === "TEARDOWN" ||
@@ -351,9 +439,39 @@ function analyze(text, options = {}) {
                 if (event.rest && !testNames.has(event.rest)) {
                     push(
                         event,
-                        `Unknown ${event.keyword.replace("-", " ")} test '${event.rest}'`,
-                        restIndex(event.text, event.keyword === "SUITE-SETUP" || event.keyword === "SUITE-TEARDOWN" ? "SUITE" : event.keyword),
+                        `Unknown ${event.keyword} test '${event.rest}'`,
+                        restIndex(event.text, event.keyword),
                     );
+                }
+            } else if (
+                currentKind === "helper" &&
+                (event.keyword === "SKIP" ||
+                    event.keyword === "ONLY" ||
+                    event.keyword === "QUARANTINE" ||
+                    event.keyword === "EXAMPLES" ||
+                    event.keyword === "DEPENDS")
+            ) {
+                push(event, `${event.keyword} cannot appear on a HELPER`);
+            } else if (event.keyword === "DEPENDS") {
+                const names = event.rest.split(",").map((item) => item.trim()).filter(Boolean);
+                if (!names.length) {
+                    push(event, "DEPENDS requires a test name", restIndex(event.text, "DEPENDS"));
+                } else {
+                    for (const name of names) {
+                        if (!testNames.has(name)) {
+                            push(
+                                event,
+                                `Unknown DEPENDS test '${name}'`,
+                                restIndex(event.text, "DEPENDS"),
+                            );
+                        } else if (helperNames.has(name)) {
+                            push(
+                                event,
+                                `DEPENDS '${name}' is a HELPER, not a primary TEST`,
+                                restIndex(event.text, "DEPENDS"),
+                            );
+                        }
+                    }
                 }
             } else if (event.keyword === "OPTIONS" && inTest) {
                 push(

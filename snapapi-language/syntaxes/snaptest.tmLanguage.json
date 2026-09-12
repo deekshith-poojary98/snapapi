@@ -206,7 +206,7 @@
                     }
                 },
                 {
-                    "match": "^(\\s*)(TEST)(:)\\s*(.*)$",
+                    "match": "^(\\s*)(TEST|HELPER)(:)\\s*(.*)$",
                     "captures": {
                         "2": {
                             "name": "keyword.control.snaptest"
@@ -220,7 +220,7 @@
                     }
                 },
                 {
-                    "match": "^(\\s*)(SETUP|TEARDOWN)(:)\\s*(.*)$",
+                    "match": "^(\\s*)(SETUP|TEARDOWN|SUITE-SETUP|SUITE-TEARDOWN)(:)\\s*(.*)$",
                     "captures": {
                         "2": {
                             "name": "keyword.control.snaptest"
@@ -257,27 +257,6 @@
         "keywordLines": {
             "patterns": [
                 {
-                    "begin": "^(\\s*)(STOP-ON-FAILURE)(:)",
-                    "end": "$",
-                    "beginCaptures": {
-                        "2": {
-                            "name": "keyword.control.snaptest"
-                        },
-                        "3": {
-                            "name": "punctuation.separator.key-value.snaptest"
-                        }
-                    },
-                    "patterns": [
-                        {
-                            "name": "constant.language.boolean.snaptest",
-                            "match": "(?i)\\b(true|false|yes|no|on|off)\\b"
-                        },
-                        {
-                            "include": "#values"
-                        }
-                    ]
-                },
-                {
                     "begin": "^(\\s*)(HEADER)(:)",
                     "end": "$",
                     "beginCaptures": {
@@ -295,7 +274,7 @@
                     ]
                 },
                 {
-                    "begin": "^(\\s*)(DESC|URL|TIMEOUT|TAG|QUERY|PARAM|FILE|GRAPHQL|EXAMPLES|SKIP|ONLY|QUARANTINE|FOLLOW-REDIRECTS|SUITE-SETUP|SUITE-TEARDOWN|WAIT|SET)(:)",
+                    "begin": "^(\\s*)(DESC|URL|TIMEOUT|TAG|QUERY|PARAM|FILE|GRAPHQL|EXAMPLES|SKIP|ONLY|QUARANTINE|FOLLOW-REDIRECTS|WAIT|SET|DEPENDS)(:)",
                     "end": "$",
                     "beginCaptures": {
                         "2": {
