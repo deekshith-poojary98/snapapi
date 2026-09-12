@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from snapapi.engine import Engine
 from snapapi.exceptions import ParseError, SnapAPIError
 from snapapi.fmt import format_file
-from snapapi.history import append_history, read_last_failed, write_last_run
+from snapapi.history import append_history, format_history, read_history, read_last_failed, write_last_run
 from snapapi.lint import format_issues, lint_files
 from snapapi.openapi import generate_smoke
 from snapapi.parser import TestParser
@@ -36,10 +37,22 @@ def build_parser():
     fmt.add_argument("paths", nargs="+")
     fmt.add_argument("--check", action="store_true")
 
-    openapi = sub.add_parser("openapi", help="Generate GET smoke tests from an OpenAPI spec")
+    openapi = sub.add_parser("openapi", help="Generate smoke tests from an OpenAPI spec")
     openapi.add_argument("spec")
     openapi.add_argument("--base-url")
     openapi.add_argument("-o", "--output")
+
+    history = sub.add_parser("history", help="Show recent run history from .snapapi/history.jsonl")
+    history.add_argument("--failed", action="store_true")
+    history.add_argument("--since", help="Only rows newer than 7d, 24h, or 30m")
+
+    mock = sub.add_parser("mock", help="Serve routes from a JSON mock file")
+    mock.add_argument("spec", help="JSON file with a routes array")
+    mock.add_argument("--port", type=int, default=8765)
+
+    watch = sub.add_parser("watch", help="Re-run suites when .snaptest files change")
+    _add_run_args(watch)
+    watch.add_argument("--interval", type=float, default=0.5)
 
     # Default positional paths so `snapapi file.snaptest` still works.
     parser.add_argument("paths", nargs="*", help=argparse.SUPPRESS)
@@ -62,11 +75,16 @@ def _add_run_args(parser, optional=False):
     parser.add_argument("--include-skipped", action="store_true")
     parser.add_argument("--include-quarantine", action="store_true")
     parser.add_argument("--last-failed", action="store_true")
-    parser.add_argument("--mode", choices=["live", "record", "replay"])
+    parser.add_argument("--mode", choices=["live", "record", "replay", "record-on-miss"])
     parser.add_argument("--on-fail", action="append", default=[], metavar="curl|har:DIR")
     parser.add_argument("--no-dump", action="store_true", help="Do not print request/response on failure")
     parser.add_argument("--safe-url", action="store_true", help="Block private/metadata URLs")
     parser.add_argument("--allow-private-urls", action="store_true")
+    parser.add_argument("--proxy", metavar="URL", help="HTTP/HTTPS proxy URL")
+    parser.add_argument("--insecure", action="store_true", help="Skip TLS certificate verification")
+    parser.add_argument("--cert", metavar="PATH", help="Client certificate for TLS")
+    parser.add_argument("--cacert", metavar="PATH", help="CA bundle used to verify TLS")
+    parser.add_argument("--record-on-miss", action="store_true", help="In replay mode, record missing cassettes")
 
 
 def collect_files(paths):
@@ -124,6 +142,11 @@ def run_suites(
     on_fail=None,
     mode=None,
     safe_url=False,
+    last_failed=None,
+    verify=True,
+    cert=None,
+    proxies=None,
+    record_on_miss=False,
 ):
     parser = TestParser()
     variables = base_variables(env_file=env_file, extra=extra_vars)
@@ -146,6 +169,11 @@ def run_suites(
             on_fail=on_fail,
             mode=mode,
             safe_url=safe_url,
+            last_failed=last_failed,
+            verify=verify,
+            cert=cert,
+            proxies=proxies,
+            record_on_miss=record_on_miss,
         )
         results.append(engine.run())
     return results
@@ -153,7 +181,7 @@ def run_suites(
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] in ("lint", "fmt", "openapi", "run"):
+    if argv and argv[0] in ("lint", "fmt", "openapi", "run", "history", "mock", "watch"):
         command = argv[0]
         rest = argv[1:]
     else:
@@ -167,6 +195,12 @@ def main(argv=None):
             return _cmd_fmt(rest)
         if command == "openapi":
             return _cmd_openapi(rest)
+        if command == "history":
+            return _cmd_history(rest)
+        if command == "mock":
+            return _cmd_mock(rest)
+        if command == "watch":
+            return _cmd_watch(rest)
         return _cmd_run(rest)
     except (ParseError, SnapAPIError, OSError, ValueError) as exc:
         print(f"snapapi: {exc}", file=sys.stderr)
@@ -177,16 +211,27 @@ def _cmd_run(argv):
     parser = argparse.ArgumentParser(prog="snapapi")
     _add_run_args(parser)
     args = parser.parse_args(argv)
+    return _run_from_args(args)
+
+
+def _run_from_args(args):
     files = collect_files(args.paths)
     report_specs = parse_report_specs(args.report)
     extra = {}
     if args.profile:
         extra.update(load_profile(args.profile))
     names = list(args.names or [])
+    last_failed = None
     if args.last_failed:
-        names.extend(read_last_failed())
-        if not names:
+        last_failed = read_last_failed()
+        if not last_failed:
             raise SnapAPIError("No last-failed tests recorded")
+    tls = _tls_options(args)
+    mode = args.mode
+    record_on_miss = bool(getattr(args, "record_on_miss", False))
+    if mode == "record-on-miss":
+        mode = "replay"
+        record_on_miss = True
     results = run_suites(
         files,
         tags=args.tags,
@@ -201,8 +246,13 @@ def _cmd_run(argv):
         workers=args.workers,
         dump_on_fail=not args.no_dump,
         on_fail=args.on_fail,
-        mode=args.mode,
+        mode=mode,
         safe_url=args.safe_url and not args.allow_private_urls,
+        last_failed=last_failed,
+        verify=tls["verify"],
+        cert=tls["cert"],
+        proxies=tls["proxies"],
+        record_on_miss=record_on_miss,
     )
     write_last_run(results)
     append_history(results)
@@ -255,6 +305,55 @@ def _cmd_fmt(argv):
     return 0
 
 
+def _cmd_history(argv):
+    parser = argparse.ArgumentParser(prog="snapapi history")
+    parser.add_argument("--failed", action="store_true")
+    parser.add_argument("--since", help="Only rows newer than 7d, 24h, or 30m")
+    args = parser.parse_args(argv)
+    text = format_history(read_history(), failed=args.failed, since=args.since)
+    print(text)
+    return 0
+
+
+def _cmd_mock(argv):
+    parser = argparse.ArgumentParser(prog="snapapi mock")
+    parser.add_argument("spec")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args(argv)
+    from snapapi.mock import MockServer, load_mock_routes
+
+    server = MockServer(load_mock_routes(args.spec), port=args.port)
+    print(server.url, flush=True)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.stop()
+    return 0
+
+
+def _cmd_watch(argv):
+    parser = argparse.ArgumentParser(prog="snapapi watch")
+    _add_run_args(parser)
+    parser.add_argument("--interval", type=float, default=0.5)
+    args = parser.parse_args(argv)
+    from snapapi.watch import snapshot_mtimes
+
+    files = collect_files(args.paths)
+    previous, _ = snapshot_mtimes(files)
+    code = _run_from_args(args)
+    try:
+        while True:
+            time.sleep(max(0.05, float(args.interval or 0.5)))
+            files = collect_files(args.paths)
+            previous, changed = snapshot_mtimes(files, previous)
+            if changed:
+                code = _run_from_args(args)
+    except KeyboardInterrupt:
+        return code
+
+
 def _cmd_openapi(argv):
     parser = argparse.ArgumentParser(prog="snapapi openapi")
     parser.add_argument("spec")
@@ -265,6 +364,23 @@ def _cmd_openapi(argv):
     if not args.output:
         print(text, end="")
     return 0
+
+
+def _tls_options(args):
+    verify = True
+    if getattr(args, "insecure", False):
+        verify = False
+    elif getattr(args, "cacert", None):
+        verify = args.cacert
+    proxies = None
+    proxy = getattr(args, "proxy", None)
+    if proxy:
+        proxies = {"http": proxy, "https": proxy}
+    return {
+        "verify": verify,
+        "cert": getattr(args, "cert", None),
+        "proxies": proxies,
+    }
 
 
 def entry():

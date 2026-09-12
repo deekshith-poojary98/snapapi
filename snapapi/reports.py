@@ -68,19 +68,33 @@ def write_html_report(payload, path):
             status = test.get("status") or "passed"
             color = {"passed": "#15803d", "failed": "#b91c1c", "skipped": "#a16207"}.get(status, "#334155")
             error = _xml_text(test.get("error") or "")
+            details = []
+            for req in test.get("requests") or []:
+                method = _xml_text(req.get("method"))
+                url = _xml_text(req.get("url"))
+                code = req.get("status_code")
+                details.append(f"<div class='req'><strong>{method} {url}</strong> → {code}")
+                if req.get("request_body") is not None:
+                    details.append(f"<pre>request: {_xml_text(req.get('request_body'))}</pre>")
+                if req.get("response_body"):
+                    details.append(f"<pre>response: {_xml_text(req.get('response_body'))}</pre>")
+                details.append("</div>")
+            detail_html = "".join(details)
             rows.append(
                 f"<tr><td>{_xml_text(suite.get('name'))}</td><td>{_xml_text(test.get('name'))}</td>"
                 f"<td style='color:{color}'>{status}</td><td>{_seconds(test.get('duration_ms', 0))}s</td>"
-                f"<td>{error}</td></tr>"
+                f"<td>{error}{detail_html}</td></tr>"
             )
     html = (
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>SnapAPI report</title>"
         "<style>body{font-family:ui-sans-serif,system-ui,sans-serif;margin:2rem;color:#0f172a}"
         "table{border-collapse:collapse;width:100%}th,td{border-bottom:1px solid #e2e8f0;"
-        "text-align:left;padding:.5rem .75rem}.summary{margin-bottom:1.5rem}</style></head><body>"
+        "text-align:left;padding:.5rem .75rem;vertical-align:top}.summary{margin-bottom:1.5rem}"
+        "pre{white-space:pre-wrap;background:#f8fafc;padding:.5rem;border-radius:6px}"
+        ".req{margin-top:.5rem;font-size:.9rem;color:#334155}</style></head><body>"
         f"<h1>SnapAPI report</h1><p class=\"summary\">{payload.get('passed', 0)} passed, "
         f"{payload.get('failed', 0)} failed, {payload.get('skipped', 0)} skipped</p>"
-        "<table><thead><tr><th>Suite</th><th>Test</th><th>Status</th><th>Time</th><th>Error</th></tr></thead>"
+        "<table><thead><tr><th>Suite</th><th>Test</th><th>Status</th><th>Time</th><th>Details</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table></body></html>\n"
     )
     target.write_text(html, encoding="utf-8")
@@ -116,4 +130,10 @@ def _json_default(value):
 
 
 def _xml_text(value):
-    return str(value) if value is not None else ""
+    text = "" if value is None else str(value)
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )

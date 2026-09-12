@@ -8,11 +8,27 @@ import requests
 class APIClient:
     """Session-backed HTTP client with JSON, form, raw, multipart, and GraphQL bodies."""
 
-    def __init__(self, base_url=None, timeout=30, follow_redirects=True):
+    def __init__(
+        self,
+        base_url=None,
+        timeout=30,
+        follow_redirects=True,
+        verify=True,
+        cert=None,
+        proxies=None,
+    ):
         self.base_url = (base_url or "").rstrip("/")
         self.timeout = timeout
         self.follow_redirects = follow_redirects
+        self.verify = verify
+        self.cert = cert
+        self.proxies = dict(proxies or {})
         self.session = requests.Session()
+        self.session.verify = verify
+        if cert:
+            self.session.cert = cert
+        if self.proxies:
+            self.session.proxies.update(self.proxies)
 
     def request(
         self,

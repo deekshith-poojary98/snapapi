@@ -313,6 +313,10 @@ function cliArgs(file, extraArgs) {
     if (envFile) {
         args.push("--env", envFile);
     }
+    const profile = (config.get("profile") || "").trim();
+    if (profile) {
+        args.push("--profile", profile);
+    }
     args.push(...extraArgs);
     args.push(file);
     return args;

@@ -1,0 +1,9 @@
+SUITE: Offline
+DESC: Replay-only CI fixture (no network)
+OPTIONS: {"CASSETTE_DIR": "tests/fixtures/cassettes"}
+URL: http://vcr.example.invalid
+
+TEST: Ping
+  GET: /ping
+  EXPECT: status == 200
+  EXPECT: json $.ok == true

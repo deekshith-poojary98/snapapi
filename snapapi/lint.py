@@ -26,9 +26,15 @@ def lint_suite(suite, variables=None, strict=False):
     saved = set()
     used_saves = set()
     source = suite.get("source") or "<string>"
+    for item in suite.get("sets") or []:
+        env.add(item["name"])
 
     for test in suite.get("tests") or []:
+        for item in test.get("sets") or []:
+            env.add(item["name"])
         for step in test.get("steps") or []:
+            for item in step.get("sets") or []:
+                env.add(item["name"])
             for save in step.get("saves") or []:
                 saved.add(save["name"])
             blobs = [
@@ -38,6 +44,7 @@ def lint_suite(suite, variables=None, strict=False):
                 step.get("headers"),
                 step.get("query"),
                 step.get("raw_body"),
+                *[item.get("value") for item in (step.get("sets") or [])],
             ]
             for blob in blobs:
                 for name in _names_in(blob):

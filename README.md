@@ -61,15 +61,23 @@ Options:
 | `--report html:report.html` | Write a self-contained HTML report |
 | `--stop-on-failure` | Stop each suite on the first failed test |
 | `--profile stage` | Load `environments/stage.env`, `.snapapi/stage.env`, or `stage.env` |
-| `--workers N` | Run independent tests in parallel (SAVE is isolated per test) |
+| `--workers N` | Run independent tests in parallel (SAVE is isolated per test; sibling SAVE falls back to sequential) |
 | `--grep regex` | Filter tests by name/description |
-| `--last-failed` | Re-run failures from `.snapapi/last-run.json` |
-| `--mode record\|replay` | VCR cassettes under `.snapapi/cassettes/` |
+| `--last-failed` | Re-run failures from `.snapapi/last-run.json` (matches file + suite + name, including `Test [row]`) |
+| `--mode record\|replay\|record-on-miss` | VCR cassettes under `.snapapi/cassettes/` |
+| `--record-on-miss` | With `--mode replay`, hit the network and save when a cassette is missing |
 | `--on-fail curl` / `--on-fail har:dir` | Emit a redacted curl or HAR on failure |
 | `--safe-url` | Block private/metadata hosts |
+| `--proxy URL` | HTTP/HTTPS proxy |
+| `--insecure` | Skip TLS certificate verification |
+| `--cert PATH` | Client certificate |
+| `--cacert PATH` | CA bundle used to verify TLS |
 | `snapapi lint PATH` | Parse/validate without HTTP |
 | `snapapi fmt PATH` | Format `.snaptest` files |
-| `snapapi openapi spec.yaml` | Generate GET smoke tests |
+| `snapapi openapi spec.yaml` | Generate GET/POST/PUT/PATCH/DELETE smoke tests |
+| `snapapi history [--failed] [--since 7d]` | Print `.snapapi/history.jsonl` |
+| `snapapi mock mock.json [--port 0]` | Serve routes from a JSON mock file (prints the URL) |
+| `snapapi watch PATH` | Re-run when `.snaptest` files change |
 
 The process exits `0` when every test passed, `1` when a test failed, and `2` on parse or usage errors.
 
@@ -110,8 +118,9 @@ TEST: List Users
   EXPECT: status == 200
 
 TEST: Wait for ready
-  GET: /health
-  EXPECT: status == 200 RETRY 5
+  GET: /jobs/${id}
+  WAIT: json $.status == "ready" TIMEOUT 10s BACKOFF 0.5s
+  EXPECT: status == 200
 ```
 
 Comments are `//` lines. Indentation is cosmetic. JSON bodies may be one line or span multiple lines.
@@ -133,17 +142,25 @@ EXPECT: HEADER Content-Type CONTAINS json
 
 ### Keywords
 
-- Suite: `SUITE`, `DESC`, `URL`, `TIMEOUT`, `STOP-ON-FAILURE`, `FOLLOW-REDIRECTS`, `OPTIONS`, `IMPORT`, `SUITE SETUP`
-- Test: `TEST`, `TAG`, `SETUP`, `TEARDOWN`, `SKIP`, `ONLY`, `QUARANTINE`, `EXAMPLES`
-- Request: `REQUEST`, `GET`/`POST`/`PUT`/`PATCH`/`DELETE`, `BODY`/`DATA`, `FILE`, `GRAPHQL`, `HEADER`/`HEADERS`, `QUERY`, `PARAM`, `AUTH`, `EXPECT`, `SAVE`
+- Suite: `SUITE`, `DESC`, `URL`, `TIMEOUT`, `STOP-ON-FAILURE`, `FOLLOW-REDIRECTS`, `OPTIONS`, `IMPORT`, `SUITE SETUP`, `SET`
+- Test: `TEST`, `TAG`, `SETUP`, `TEARDOWN`, `SKIP`, `ONLY`, `QUARANTINE`, `EXAMPLES`, `SET`
+- Request: `REQUEST`, `GET`/`POST`/`PUT`/`PATCH`/`DELETE`, `BODY`/`DATA`, `FILE`, `GRAPHQL`, `HEADER`/`HEADERS`, `QUERY`, `PARAM`, `AUTH`, `EXPECT`, `SAVE`, `WAIT`, `SET`
 
 `SETUP` / `TEARDOWN` name another `TEST`. Those helper tests are not run as standalone cases.
 
 `IMPORT: other.snaptest` pulls tests from another file (paths are relative to the current file).
 
+`SET: orderId ${uuid()}` assigns an interpolated value (including helpers) without an HTTP call. It may appear at suite, test, or step level.
+
+`WAIT: json $.status == "ready" TIMEOUT 10s BACKOFF 0.5s` reissues the current request until the check passes or the timeout expires. `EXPECT: json $.status == "ready" RETRY 20 BACKOFF 0.5s` also retries when the HTTP status is already 200.
+
 `AUTH: bearer ${TOKEN}` sets `Authorization: Bearer ${TOKEN}`. Explicit `HEADER` lines still work.
 
+`AUTH: oauth2 grant=client_credentials token_url=... client_id=...` and `grant=password username=... password=...` fetch a token (cached). If the token response includes `refresh_token`, a 401 retries once after refresh. Browser PKCE is not implemented.
+
 `QUERY: page=2&limit=10` and `PARAM: page 2` attach query parameters to the current request (they merge with any query string already in the path).
+
+`OPTIONS: {"OPENAPI": "spec.yaml"}` validates JSON responses against the matching path+method response schema when present. `EXPECT: openapi ./spec.yaml` does the same for one step. Partial path match (`/users/{id}` vs `/users/1`) is allowed; missing schemas are skipped.
 
 ### Checks
 
@@ -162,6 +179,7 @@ EXPECT: json $.tags contains "admin"
 EXPECT: schema ./schemas/user.json
 EXPECT: duration < 200ms
 EXPECT: header Content-Type contains json
+EXPECT: openapi ./openapi.yaml
 ```
 
 Also accepted:
@@ -173,17 +191,21 @@ EXPECT: JSON $.data.email == "jane@example.com"
 EXPECT: HEADER Content-Type CONTAINS json
 ```
 
-JSONPath is a small subset: `$.a.b`, `$.items.0.id`, or `$.items[0].id`.
+JSONPath is a small subset: `$.a.b`, `$.items.0.id`, `$.items[0].id`, and `$.items[*].id`. Filter expressions such as `$[?(@.x==1)]` are not supported.
 
 ### Variables
 
 `${NAME}` is expanded in URLs, paths, headers, data, and expect values.
 
-Lookup order: process environment, then `--env` file, then values stored by `SAVE`.
+Lookup order: process environment, then `--env` file, then `SET` / `SAVE` values.
 
 ## Sample suite
 
-`tests/recommended.snaptest` shows the current DSL against a local mock server (pytest injects `BASE_URL`). `tests/test_suite.snaptest` is a classic-syntax example against [reqres.in](https://reqres.in) and needs network access. Automated tests in `tests/test_*.py` use a local mock HTTP server and do not call reqres.
+`tests/recommended.snaptest` shows the current DSL against a local mock server (pytest injects `BASE_URL`). `tests/test_suite.snaptest` is a classic-syntax example against [reqres.in](https://reqres.in) and needs network access. Automated tests in `tests/test_*.py` use a local mock HTTP server and do not call reqres. CI replays `tests/fixtures/offline.snaptest` from a checked-in cassette.
+
+HTML reports include redacted request/response bodies. VCR cassette keys include method, sorted query string, `Content-Type`/`Accept`, and body. Replay restores `Set-Cookie` onto the session.
+
+`snapapi mock tests/fixtures/mock.json --port 0` serves `{"routes":[{"method":"GET","path":"/ping","status":200,"json":{"ok":true}}]}`. There is no language server, gRPC, or WebSocket support.
 
 ## Project layout
 

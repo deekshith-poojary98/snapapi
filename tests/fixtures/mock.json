@@ -1,0 +1,10 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/ping",
+      "status": 200,
+      "json": {"ok": true}
+    }
+  ]
+}

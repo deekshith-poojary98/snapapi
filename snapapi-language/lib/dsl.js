@@ -9,6 +9,9 @@ const KNOWN_KEYWORDS = new Set([
     "OPTIONS",
     "TIMEOUT",
     "STOP-ON-FAILURE",
+    "FOLLOW-REDIRECTS",
+    "SUITE-SETUP",
+    "SUITE-TEARDOWN",
     "TEST",
     "TAG",
     "SETUP",
@@ -24,12 +27,21 @@ const KNOWN_KEYWORDS = new Set([
     "EXPECT",
     "SAVE",
     "IMPORT",
+    "FILE",
+    "GRAPHQL",
+    "EXAMPLES",
+    "SKIP",
+    "ONLY",
+    "QUARANTINE",
+    "WAIT",
+    "SET",
     ...HTTP_METHODS,
 ]);
-const JSON_VALUE_KEYWORDS = new Set(["OPTIONS", "DATA", "BODY", "HEADERS"]);
-const AUTH_SCHEMES = ["bearer", "basic", "digest", "token"];
+const JSON_VALUE_KEYWORDS = new Set(["OPTIONS", "DATA", "BODY", "HEADERS", "GRAPHQL"]);
+const AUTH_SCHEMES = ["bearer", "basic", "digest", "token", "oauth2"];
 const LINE_KEYWORD_RE = /^([A-Z][A-Z0-9_-]*):(.*)$/;
 const HEADER_LINE_RE = /^HEADER\s+(\S+)\s*:\s*(.*)$/;
+const SUITE_HOOK_RE = /^SUITE\s+(SETUP|TEARDOWN):\s*(.*)$/i;
 
 const KEYWORD_COMPLETIONS = [
     { label: "SUITE", detail: "Suite name" },
@@ -37,27 +49,37 @@ const KEYWORD_COMPLETIONS = [
     { label: "URL", detail: "Base URL" },
     { label: "TIMEOUT", detail: "HTTP timeout in seconds" },
     { label: "STOP-ON-FAILURE", detail: "Stop the suite on the first failure" },
+    { label: "FOLLOW-REDIRECTS", detail: "Follow HTTP redirects" },
+    { label: "SUITE SETUP", detail: "Run a helper TEST before the suite" },
     { label: "OPTIONS", detail: "Suite options JSON (legacy)" },
     { label: "IMPORT", detail: "Pull tests from another .snaptest file" },
     { label: "TEST", detail: "Start a test" },
     { label: "TAG", detail: "Tags for the current test" },
     { label: "SETUP", detail: "Run another TEST first" },
     { label: "TEARDOWN", detail: "Run another TEST after" },
+    { label: "SKIP", detail: "Skip this test" },
+    { label: "ONLY", detail: "Run only this test" },
+    { label: "QUARANTINE", detail: "Quarantine this test" },
+    { label: "EXAMPLES", detail: "CSV rows that expand into tests" },
     { label: "REQUEST", detail: "METHOD /path (legacy)" },
     { label: "GET", detail: "GET request" },
     { label: "POST", detail: "POST request" },
     { label: "PUT", detail: "PUT request" },
     { label: "PATCH", detail: "PATCH request" },
     { label: "DELETE", detail: "DELETE request" },
-    { label: "BODY", detail: "JSON body" },
+    { label: "BODY", detail: "JSON, form, or raw body" },
     { label: "DATA", detail: "JSON body (legacy alias of BODY)" },
+    { label: "FILE", detail: "Multipart file field FROM path" },
+    { label: "GRAPHQL", detail: "GraphQL JSON payload" },
     { label: "HEADER", detail: "Single header" },
     { label: "HEADERS", detail: "Headers JSON (legacy)" },
     { label: "QUERY", detail: "Query string on the current request" },
     { label: "PARAM", detail: "Single query parameter" },
-    { label: "AUTH", detail: "Authorization header" },
+    { label: "AUTH", detail: "Authorization header or oauth2" },
     { label: "EXPECT", detail: "Assertion on the current request" },
-    { label: "SAVE", detail: "Store a JSONPath value as ${name}" },
+    { label: "SAVE", detail: "Store a JSONPath/header/cookie value as ${name}" },
+    { label: "WAIT", detail: "Poll the request until a JSONPath matches" },
+    { label: "SET", detail: "Assign a variable without HTTP" },
 ];
 
 function jsonComplete(text) {
@@ -105,6 +127,14 @@ function isCommentOrBlank(stripped) {
 }
 
 function splitKeyword(stripped) {
+    const hook = SUITE_HOOK_RE.exec(stripped);
+    if (hook) {
+        return {
+            keyword: `SUITE-${hook[1].toUpperCase()}`,
+            rest: hook[2].trim(),
+            form: "suite-hook",
+        };
+    }
     const match = LINE_KEYWORD_RE.exec(stripped);
     if (match) {
         return { keyword: match[1], rest: match[2].trim(), form: "colon" };
@@ -146,6 +176,7 @@ function walkLines(text, handlers) {
     const lines = text.split(/\r?\n/);
     let jsonBuf = null;
     let jsonMeta = null;
+    let inExamples = false;
 
     const flushJson = () => {
         if (jsonBuf === null || !jsonMeta) {
@@ -182,11 +213,15 @@ function walkLines(text, handlers) {
         }
         const parsed = splitKeyword(stripped);
         if (!parsed) {
+            if (inExamples) {
+                continue;
+            }
             if (handlers.onInvalid) {
                 handlers.onInvalid({ line: i, text: lineText, stripped });
             }
             continue;
         }
+        inExamples = parsed.keyword === "EXAMPLES";
         if (handlers.onKeyword) {
             handlers.onKeyword({
                 line: i,
@@ -198,6 +233,10 @@ function walkLines(text, handlers) {
             });
         }
         if (JSON_VALUE_KEYWORDS.has(parsed.keyword)) {
+            const lower = parsed.rest.toLowerCase();
+            if ((parsed.keyword === "BODY" || parsed.keyword === "DATA") && (lower.startsWith("form") || lower.startsWith("raw"))) {
+                continue;
+            }
             jsonBuf = parsed.rest;
             jsonMeta = { keyword: parsed.keyword, line: i, text: lineText };
             if (jsonComplete(jsonBuf)) {
@@ -297,12 +336,17 @@ function analyze(text, options = {}) {
                 } else {
                     seenTests.add(event.rest);
                 }
-            } else if (event.keyword === "SETUP" || event.keyword === "TEARDOWN") {
+            } else if (
+                event.keyword === "SETUP" ||
+                event.keyword === "TEARDOWN" ||
+                event.keyword === "SUITE-SETUP" ||
+                event.keyword === "SUITE-TEARDOWN"
+            ) {
                 if (event.rest && !testNames.has(event.rest)) {
                     push(
                         event,
-                        `Unknown ${event.keyword} test '${event.rest}'`,
-                        restIndex(event.text, event.keyword),
+                        `Unknown ${event.keyword.replace("-", " ")} test '${event.rest}'`,
+                        restIndex(event.text, event.keyword === "SUITE-SETUP" || event.keyword === "SUITE-TEARDOWN" ? "SUITE" : event.keyword),
                     );
                 }
             } else if (event.keyword === "REQUEST") {

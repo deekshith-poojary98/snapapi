@@ -27,3 +27,13 @@ def test_missing_path():
 def test_requires_dollar():
     with pytest.raises(JsonPathError, match="must start with"):
         extract({"a": 1}, "a.b")
+
+
+def test_wildcard_map():
+    data = {"items": [{"id": 10}, {"id": 20}]}
+    assert extract(data, "$.items[*].id") == [10, 20]
+
+
+def test_filter_not_supported():
+    with pytest.raises(JsonPathError, match="not supported"):
+        extract([{"x": 1}], "$[?(@.x==1)]")

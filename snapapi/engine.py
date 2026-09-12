@@ -6,7 +6,7 @@ import re
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, CancelledError, ThreadPoolExecutor, wait
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -17,10 +17,11 @@ from colorama import Fore, Style, init
 from snapapi.api_client import APIClient, open_files
 from snapapi.cassette import cassette_key, load_cassettes, save_cassette
 from snapapi.exceptions import JsonPathError, SnapAPIError
+from snapapi.openapi import load_spec, response_schema
 from snapapi import jsonpath
 from snapapi.redact import redact_body, redact_headers
 from snapapi.safety import assert_public_url
-from snapapi.variables import interpolate
+from snapapi.variables import VAR_PATTERN, interpolate
 
 init(autoreset=True)
 
@@ -189,6 +190,11 @@ class Engine:
         cassette_dir=None,
         safe_url=False,
         isolate_variables=None,
+        last_failed=None,
+        verify=True,
+        cert=None,
+        proxies=None,
+        record_on_miss=False,
     ):
         self.suite = suite
         self.variables = dict(variables or {})
@@ -210,6 +216,13 @@ class Engine:
         self.mode = (mode or options.get("MODE") or "live").lower()
         self.cassette_dir = cassette_dir or options.get("CASSETTE_DIR") or ".snapapi/cassettes"
         self.safe_url = safe_url or _as_bool(options.get("SAFE-URL"), False)
+        self.last_failed = list(last_failed or [])
+        self.verify = verify
+        self.cert = cert
+        self.proxies = dict(proxies or {})
+        self.record_on_miss = bool(record_on_miss) or self.mode == "record-on-miss"
+        if self.mode == "record-on-miss":
+            self.mode = "replay"
         if isolate_variables is None:
             isolate_variables = self.workers > 1
         self.isolate_variables = isolate_variables
@@ -226,9 +239,11 @@ class Engine:
         self._helpers = helper_names(suite)
         self._print_lock = threading.Lock()
         self._oauth_cache = {}
-        self._cassettes = load_cassettes(self.cassette_dir) if self.mode == "replay" else {}
+        self._cassettes = load_cassettes(self.cassette_dir) if self.mode in ("replay", "record-on-miss") else {}
+        self._cassette_lock = threading.Lock()
         self._last_duration = 0
         self._client = None
+        self._openapi_spec = self._load_openapi_spec(options.get("OPENAPI"))
 
     def run(self):
         started = time.perf_counter()
@@ -236,6 +251,7 @@ class Engine:
         self._print(f"{self._paint('SnapAPI', Fore.CYAN, Style.BRIGHT)}  {name}")
         if self.suite.get("description"):
             self._print(self._paint(self.suite["description"], Style.DIM))
+        self._apply_sets(self.suite.get("sets"))
 
         results = []
         if self.suite.get("setup"):
@@ -260,7 +276,19 @@ class Engine:
                 return suite_result
 
         primaries = self._primary_tests()
-        if self.workers > 1 and not self.stop_on_failure:
+        use_parallel = self.workers > 1
+        if use_parallel:
+            deps = self._sibling_save_deps(primaries)
+            if deps:
+                self._print(
+                    self._paint(
+                        "  warning: tests share SAVE values across primaries; running sequentially",
+                        Fore.YELLOW,
+                    )
+                )
+                use_parallel = False
+                self.isolate_variables = False
+        if use_parallel:
             results.extend(self._run_parallel(primaries))
         else:
             for test in primaries:
@@ -328,6 +356,8 @@ class Engine:
 
     def _run_examples(self, test):
         rows = test.get("examples") or [None]
+        rows = self._selected_example_rows(test, rows)
+        isolate_rows = self.isolate_variables or bool(test.get("examples"))
         results = []
         for row in rows:
             snapshot = dict(self.variables)
@@ -338,36 +368,96 @@ class Engine:
                 label = next((value for value in row.values() if value), "row")
                 result.name = f"{test['name']} [{label}]"
             results.append(result)
-            if self.isolate_variables:
+            if isolate_rows:
                 self.variables = snapshot
         return results
 
+    def _selected_example_rows(self, test, rows):
+        if not self.last_failed:
+            return rows
+        wanted = []
+        whole = False
+        for item in self.last_failed:
+            if not self._identity_matches(item, test):
+                continue
+            name = item["name"] if isinstance(item, dict) else item
+            if name == test["name"]:
+                whole = True
+                break
+            wanted.append(name)
+        if whole or not wanted:
+            return rows
+        selected = []
+        for row in rows:
+            if not row:
+                if test["name"] in wanted:
+                    selected.append(row)
+                continue
+            label = next((value for value in row.values() if value), "row")
+            if f"{test['name']} [{label}]" in wanted:
+                selected.append(row)
+        return selected or rows
+
     def _run_parallel(self, primaries):
-        jobs = []
+        results = []
+        runnable = []
         for test in primaries:
             skip_reason = self._skip_reason(test)
             if skip_reason:
-                jobs.append(TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped", error=skip_reason))
+                results.append(
+                    TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped", error=skip_reason)
+                )
                 continue
             if not self._matches_filter(test):
-                jobs.append(TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped"))
+                results.append(TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped"))
                 continue
-            jobs.append(test)
-        results = []
+            runnable.append(test)
+        if not runnable:
+            return self._sort_parallel_results(results, primaries)
+
+        stop_scheduling = threading.Event()
         with ThreadPoolExecutor(max_workers=self.workers) as pool:
-            futures = {}
-            for item in jobs:
-                if isinstance(item, TestResult):
-                    results.append(item)
-                    continue
-                futures[pool.submit(self._run_isolated, item)] = item
-            for future in as_completed(futures):
-                result, output = future.result()
-                if output:
-                    self._print(output.rstrip("\n"))
-                results.append(result)
+            iterator = iter(runnable)
+            in_flight = {}
+
+            def submit_next():
+                if self.stop_on_failure and stop_scheduling.is_set():
+                    return False
+                try:
+                    test = next(iterator)
+                except StopIteration:
+                    return False
+                in_flight[pool.submit(self._run_isolated, test)] = test
+                return True
+
+            for _ in range(min(self.workers, len(runnable))):
+                if not submit_next():
+                    break
+
+            while in_flight:
+                done, _ = wait(in_flight, return_when=FIRST_COMPLETED)
+                for future in done:
+                    in_flight.pop(future, None)
+                    try:
+                        batch, output = future.result()
+                    except CancelledError:
+                        continue
+                    if output:
+                        self._print(output.rstrip("\n"))
+                    batch = batch if isinstance(batch, list) else [batch]
+                    results.extend(batch)
+                    if self.stop_on_failure and any(item.status == "failed" for item in batch):
+                        stop_scheduling.set()
+                        for pending in list(in_flight):
+                            pending.cancel()
+                if not (self.stop_on_failure and stop_scheduling.is_set()):
+                    submit_next()
+
+        return self._sort_parallel_results(results, primaries)
+
+    def _sort_parallel_results(self, results, primaries):
         order = {test["name"]: index for index, test in enumerate(primaries)}
-        results.sort(key=lambda item: order.get(item.name.split(" [")[0], 0))
+        results.sort(key=lambda item: (order.get(item.name.split(" [")[0], 0), item.name))
         return results
 
     def _run_isolated(self, test):
@@ -392,13 +482,20 @@ class Engine:
             cassette_dir=self.cassette_dir,
             safe_url=self.safe_url,
             isolate_variables=True,
+            last_failed=self.last_failed,
+            verify=self.verify,
+            cert=self.cert,
+            proxies=self.proxies,
+            record_on_miss=self.record_on_miss,
         )
         child._oauth_cache = self._oauth_cache
         child._cassettes = self._cassettes
+        child._cassette_lock = self._cassette_lock
         child._helpers = self._helpers
+        child._openapi_spec = self._openapi_spec
         results = child._run_examples(test)
         output = child.stream.getvalue() if child.stream else ""
-        return results[0] if len(results) == 1 else results[0], output
+        return results, output
 
     def _run_test(self, name, role="test"):
         test = self.suite["test_map"][name]
@@ -412,6 +509,7 @@ class Engine:
 
         self._stack.append(name)
         try:
+            self._apply_sets(test.get("sets"))
             self._announce(test, role)
             if test.get("setup"):
                 setup_result = self._run_test(test["setup"], role="setup")
@@ -469,7 +567,7 @@ class Engine:
             follow = self.suite.get("follow_redirects")
         if follow is None:
             follow = True
-        client = APIClient(base_url, timeout=self.timeout, follow_redirects=follow)
+        client = self._new_client(base_url, follow_redirects=follow)
         self._client = client
         oauth = test.get("oauth2") or self.suite.get("oauth2")
         if oauth:
@@ -489,6 +587,7 @@ class Engine:
         method = step["action"]
         handles = []
         try:
+            self._apply_sets(step.get("sets"))
             endpoint = interpolate(step["endpoint"], self.variables)
             query = interpolate(step.get("query") or {}, self.variables)
             endpoint = merge_query(endpoint, query)
@@ -514,6 +613,7 @@ class Engine:
                 return False, str(exc), None
 
         checks = step.get("checks") or []
+        wait = step.get("wait")
         attempts = max((check.get("retry") or 1) for check in checks) if checks else 1
         retry_on = next((check.get("retry_on") for check in checks if check.get("retry_on")), None)
         retry_backoff = next((check.get("retry_backoff") for check in checks if check.get("retry_backoff")), None)
@@ -521,6 +621,10 @@ class Engine:
         recorded = None
         body_type = step.get("body_type") or "json"
         follow = step.get("follow_redirects")
+        oauth = step.get("oauth2") or test.get("oauth2") or self.suite.get("oauth2")
+        wait_deadline = time.time() + wait["timeout"] if wait else None
+        if wait:
+            attempts = max(attempts, 10000)
 
         try:
             for attempt in range(1, attempts + 1):
@@ -539,6 +643,25 @@ class Engine:
                         content_type=step.get("content_type"),
                         follow_redirects=follow,
                     )
+                    if (
+                        getattr(response, "status_code", None) == 401
+                        and oauth
+                        and self._oauth_can_refresh(oauth)
+                    ):
+                        token = self._oauth_token(oauth, force_refresh=True)
+                        headers["Authorization"] = f"Bearer {token}"
+                        response = self._dispatch(
+                            client,
+                            method,
+                            endpoint,
+                            data=data,
+                            raw_body=raw_body,
+                            headers=headers,
+                            files=files or None,
+                            body_type=body_type,
+                            content_type=step.get("content_type"),
+                            follow_redirects=follow,
+                        )
                     duration_ms = (time.perf_counter() - started) * 1000
                     self._last_duration = duration_ms
                     url = getattr(response, "url", endpoint)
@@ -553,8 +676,12 @@ class Engine:
                         response_body=_response_text(response),
                     )
                     self._print_request(method, endpoint, response.status_code, duration_ms)
+                    if wait:
+                        self._execute_check(wait["check"], response, duration_ms, method, url)
                     for check in checks:
-                        self._execute_check(check, response, duration_ms)
+                        self._execute_check(check, response, duration_ms, method, url)
+                    if self._openapi_spec is not None:
+                        self._validate_openapi(self._openapi_spec, method, url, response)
                     for save in step.get("saves") or []:
                         self._save_value(save, response)
                     return True, None, recorded
@@ -580,6 +707,16 @@ class Engine:
                     self._print_request(method, endpoint, None, duration_ms)
                     retryable = _is_retryable(retry_on, None, network=True)
 
+                if wait and wait_deadline is not None and time.time() + wait["backoff"] <= wait_deadline:
+                    time.sleep(wait["backoff"])
+                    continue
+                if wait:
+                    if last_error:
+                        self._print_error(last_error)
+                        if self.dump_on_fail and recorded:
+                            self._print_dump(recorded)
+                        self._emit_on_fail(test, recorded)
+                    return False, last_error, recorded
                 if attempt < attempts and retryable:
                     delay = retry_backoff if retry_backoff is not None else self.retry_backoff * attempt
                     time.sleep(delay)
@@ -604,40 +741,73 @@ class Engine:
         content_type = kwargs.get("content_type")
         follow = kwargs.get("follow_redirects")
         url = client._build_url(endpoint)
+        body = raw_body if raw_body is not None else data
         if self.mode == "replay":
-            key = cassette_key(method, url, raw_body if raw_body is not None else data)
+            key = cassette_key(method, url, body, headers=headers)
             record = self._cassettes.get(key)
             if not record:
+                if self.record_on_miss:
+                    response = self._live_request(
+                        client,
+                        method,
+                        endpoint,
+                        data=data,
+                        raw_body=raw_body,
+                        headers=headers,
+                        files=files,
+                        body_type=body_type,
+                        content_type=content_type,
+                        follow=follow,
+                    )
+                    self._store_cassette(key, method, url, response)
+                    return response
                 raise SnapAPIError(f"No cassette for {method} {url}")
-            return _fake_response(record)
-        response = client.request(
+            return _fake_response(record, session=getattr(client, "session", None))
+        response = self._live_request(
+            client,
             method,
             endpoint,
-            json=data if body_type in (None, "json", "graphql") else None,
-            data=data if body_type == "form" else None,
-            raw=raw_body,
+            data=data,
+            raw_body=raw_body,
             headers=headers,
             files=files,
             body_type=body_type,
             content_type=content_type,
-            follow_redirects=follow,
+            follow=follow,
         )
         if self.mode == "record":
-            key = cassette_key(method, url, raw_body if raw_body is not None else data)
-            save_cassette(
-                self.cassette_dir,
-                key,
-                {
-                    "method": method,
-                    "url": url,
-                    "status_code": response.status_code,
-                    "headers": dict(response.headers),
-                    "body": response.text,
-                },
-            )
+            key = cassette_key(method, url, body, headers=headers)
+            self._store_cassette(key, method, url, response)
         return response
 
-    def _execute_check(self, check, response, duration_ms=0):
+    def _live_request(self, client, method, endpoint, **kwargs):
+        return client.request(
+            method,
+            endpoint,
+            json=kwargs.get("data") if kwargs.get("body_type") in (None, "json", "graphql") else None,
+            data=kwargs.get("data") if kwargs.get("body_type") == "form" else None,
+            raw=kwargs.get("raw_body"),
+            headers=kwargs.get("headers"),
+            files=kwargs.get("files"),
+            body_type=kwargs.get("body_type"),
+            content_type=kwargs.get("content_type"),
+            follow_redirects=kwargs.get("follow"),
+        )
+
+    def _store_cassette(self, key, method, url, response):
+        payload = {
+            "method": method,
+            "url": url,
+            "status_code": response.status_code,
+            "headers": dict(response.headers),
+            "body": response.text,
+        }
+        with self._cassette_lock:
+            save_cassette(self.cassette_dir, key, payload)
+            self._cassettes[key] = dict(payload)
+            self._cassettes[key]["key"] = key
+
+    def _execute_check(self, check, response, duration_ms=0, method=None, url=None):
         check_type = check["type"]
         if check_type == "STATUS":
             expected = int(interpolate(str(check["value"]), self.variables))
@@ -662,6 +832,11 @@ class Engine:
             self._check_schema(check, response)
         elif check_type == "DURATION":
             self._compare(duration_ms, check.get("operator") or "<", float(check["value"]), "duration")
+        elif check_type == "OPENAPI":
+            spec = self._load_openapi_spec(check.get("path"))
+            if spec is None:
+                raise AssertionError("EXPECT openapi requires a spec path")
+            self._validate_openapi(spec, method, url or getattr(response, "url", None), response)
         else:
             raise AssertionError(f"Unknown check type {check_type}")
 
@@ -781,30 +956,111 @@ class Engine:
         indent = self._spaces(1)
         self._print(self._paint(f"{indent}saved {save['name']}={value}", Style.DIM))
 
-    def _oauth_token(self, spec):
+    def _oauth_token(self, spec, force_refresh=False):
         token_url = interpolate(spec.get("token_url"), self.variables)
         client_id = interpolate(spec.get("client_id"), self.variables)
         secret = interpolate(spec.get("client_secret") or "", self.variables)
-        key = (token_url, client_id)
-        if key in self._oauth_cache:
-            return self._oauth_cache[key]
-        client = APIClient(timeout=self.timeout)
+        username = interpolate(spec.get("username") or "", self.variables)
+        key = (token_url, client_id, username)
+        cached = self._oauth_cache.get(key)
+        if isinstance(cached, str):
+            cached = {"access_token": cached}
+        if cached and cached.get("access_token") and not force_refresh:
+            return cached["access_token"]
+        grant = (spec.get("grant") or spec.get("grant_type") or "client_credentials").lower()
+        if force_refresh and cached and cached.get("refresh_token"):
+            data = {
+                "grant_type": "refresh_token",
+                "refresh_token": cached["refresh_token"],
+                "client_id": client_id,
+                "client_secret": secret,
+            }
+        elif grant == "password":
+            data = {
+                "grant_type": "password",
+                "client_id": client_id,
+                "client_secret": secret,
+                "username": username,
+                "password": interpolate(spec.get("password") or "", self.variables),
+            }
+        else:
+            data = {
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": secret,
+            }
+        client = self._new_client()
         response = client.request(
             "POST",
             token_url,
-            data={"grant_type": "client_credentials", "client_id": client_id, "client_secret": secret},
+            data=data,
             body_type="form",
         )
         if response.status_code >= 400:
             raise SnapAPIError(f"OAuth2 token request failed: {response.status_code}")
         try:
-            token = response.json().get("access_token")
+            payload = response.json()
         except ValueError as exc:
             raise SnapAPIError("OAuth2 token response is not JSON") from exc
+        token = payload.get("access_token")
         if not token:
             raise SnapAPIError("OAuth2 token response missing access_token")
-        self._oauth_cache[key] = token
+        self._oauth_cache[key] = {
+            "access_token": token,
+            "refresh_token": payload.get("refresh_token") or (cached or {}).get("refresh_token"),
+        }
         return token
+
+    def _oauth_can_refresh(self, spec):
+        token_url = interpolate(spec.get("token_url"), self.variables)
+        client_id = interpolate(spec.get("client_id"), self.variables)
+        username = interpolate(spec.get("username") or "", self.variables)
+        cached = self._oauth_cache.get((token_url, client_id, username))
+        if isinstance(cached, dict) and cached.get("refresh_token"):
+            return True
+        return False
+
+    def _apply_sets(self, sets):
+        for item in sets or []:
+            self.variables[item["name"]] = interpolate(item["value"], self.variables)
+
+    def _load_openapi_spec(self, spec_path):
+        if not spec_path:
+            return None
+        path = Path(interpolate(str(spec_path), self.variables))
+        if not path.is_absolute():
+            path = Path(self._base_dir()) / path
+        return load_spec(path)
+
+    def _validate_openapi(self, spec, method, url, response):
+        if response is None:
+            return
+        path = urlsplit(url or "").path or url or ""
+        schema = response_schema(spec, method, path, getattr(response, "status_code", None))
+        if schema is None:
+            return
+        try:
+            import jsonschema
+        except ImportError as exc:
+            raise AssertionError("jsonschema is required for OpenAPI response validation") from exc
+        try:
+            instance = response.json()
+        except ValueError as exc:
+            raise AssertionError(f"Response is not JSON: {exc}") from exc
+        try:
+            jsonschema.validate(instance, schema)
+        except jsonschema.ValidationError as exc:
+            raise AssertionError(f"OpenAPI schema validation failed: {exc.message}") from exc
+
+    def _new_client(self, base_url="", follow_redirects=True):
+        return APIClient(
+            base_url,
+            timeout=self.timeout,
+            follow_redirects=follow_redirects,
+            verify=self.verify,
+            cert=self.cert,
+            proxies=self.proxies or None,
+        )
 
     def _primary_tests(self):
         tests = self.suite.get("tests") or []
@@ -817,7 +1073,55 @@ class Engine:
             return [test for test in tests if test["name"] in selected]
         primaries = [test for test in tests if test["name"] not in self._helpers]
         only = [test for test in primaries if test.get("only")]
-        return only or primaries
+        selected = only or primaries
+        if self.last_failed:
+            selected = [test for test in selected if self._matches_last_failed(test)]
+        return selected
+
+    def _matches_last_failed(self, test):
+        return any(self._identity_matches(item, test) for item in self.last_failed)
+
+    def _identity_matches(self, item, test):
+        if isinstance(item, str):
+            item = {"name": item}
+        source = self.suite.get("source")
+        if item.get("file") and source and source != "<string>":
+            if not _same_file(item["file"], source):
+                return False
+        if item.get("suite") and self.suite.get("name") and item["suite"] != self.suite.get("name"):
+            return False
+        name = item.get("name") or ""
+        if name == test["name"]:
+            return True
+        return name.startswith(test["name"] + " [") and name.endswith("]")
+
+    def _sibling_save_deps(self, primaries):
+        saves = {}
+        for test in primaries:
+            for name in _saves_in_test(test):
+                saves.setdefault(name, set()).add(test["name"])
+        deps = []
+        for test in primaries:
+            allowed = _saves_in_test(test) | self._setup_saves(test) | set(self.variables)
+            for var in _vars_used_in_test(test):
+                owners = saves.get(var, set()) - {test["name"]}
+                if owners and var not in allowed:
+                    deps.append((test["name"], var, sorted(owners)))
+        return deps
+
+    def _setup_saves(self, test):
+        names = set()
+        seen = set()
+        current = test.get("setup")
+        test_map = self.suite.get("test_map") or {}
+        while current and current not in seen:
+            seen.add(current)
+            helper = test_map.get(current)
+            if not helper:
+                break
+            names.update(_saves_in_test(helper))
+            current = helper.get("setup")
+        return names
 
     def _skip_reason(self, test):
         if test.get("skip") and not self.include_skipped:
@@ -936,6 +1240,58 @@ def merge_query(endpoint, params):
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(merged), parts.fragment))
 
 
+def _same_file(left, right):
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except OSError:
+        return str(left) == str(right)
+
+
+def _saves_in_test(test):
+    names = set()
+    for step in test.get("steps") or []:
+        for save in step.get("saves") or []:
+            names.add(save["name"])
+    return names
+
+
+def _vars_used_in_test(test):
+    blobs = [test.get("base_url"), test.get("headers")]
+    for step in test.get("steps") or []:
+        blobs.extend(
+            [
+                step.get("endpoint"),
+                step.get("data"),
+                step.get("headers"),
+                step.get("query"),
+                step.get("raw_body"),
+            ]
+        )
+        for check in step.get("checks") or []:
+            blobs.extend(check.values())
+    names = set()
+    for blob in blobs:
+        names.update(_vars_in(blob))
+    return names
+
+
+def _vars_in(value):
+    if isinstance(value, str):
+        return set(VAR_PATTERN.findall(value))
+    if isinstance(value, dict):
+        names = set()
+        for key, item in value.items():
+            names.update(_vars_in(key))
+            names.update(_vars_in(item))
+        return names
+    if isinstance(value, list):
+        names = set()
+        for item in value:
+            names.update(_vars_in(item))
+        return names
+    return set()
+
+
 def _response_text(response):
     if response is None:
         return None
@@ -952,9 +1308,10 @@ def _is_retryable(retry_on, response, network=False):
     return True
 
 
-def _fake_response(record):
+def _fake_response(record, session=None):
     body = record.get("body") or ""
     headers = record.get("headers") or {}
+    cookies = _apply_cassette_cookies(session, headers)
 
     def _json():
         return json.loads(body) if body else {}
@@ -963,10 +1320,37 @@ def _fake_response(record):
         status_code=record.get("status_code", 200),
         text=body,
         headers=headers,
-        cookies={},
+        cookies=cookies,
         url=record.get("url"),
         json=_json,
     )
+
+
+def _apply_cassette_cookies(session, headers):
+    from http.cookies import SimpleCookie
+
+    raw = None
+    for key, value in (headers or {}).items():
+        if str(key).lower() == "set-cookie":
+            raw = value
+            break
+    cookies = {}
+    if not raw:
+        return cookies
+    parsed = SimpleCookie()
+    try:
+        if isinstance(raw, (list, tuple)):
+            for item in raw:
+                parsed.load(str(item))
+        else:
+            parsed.load(str(raw))
+    except (TypeError, ValueError):
+        return cookies
+    for name, morsel in parsed.items():
+        cookies[name] = morsel.value
+        if session is not None:
+            session.cookies.set(name, morsel.value)
+    return cookies
 
 
 def _as_curl(recorded):

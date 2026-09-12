@@ -1,0 +1,10 @@
+{
+  "method": "GET",
+  "url": "http://vcr.example.invalid/ping",
+  "status_code": 200,
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"ok\": true}",
+  "key": "ed1f132576ad783a3824a330dac09fbcac86c2861cf77b3ed6d7d664fa0a9911"
+}

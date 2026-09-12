@@ -9,7 +9,8 @@
 - Snippets for suite, GET/POST tests, EXPECT, SAVE, AUTH, HEADER, QUERY
 - **SnapAPI: Run test at cursor** via `snapapi --name`
 - Status bar and SnapAPI output channel for CLI results
-- `snapapi.cliPath` and `snapapi.envFile` settings
+- `snapapi.cliPath`, `snapapi.envFile`, and `snapapi.profile` settings
+- Diagnostics for FILE, GRAPHQL, EXAMPLES, SKIP, ONLY, QUARANTINE, FOLLOW-REDIRECTS, SUITE SETUP, WAIT, SET
 - Remove Yeoman leftover docs and unused devDependencies
 
 ## [0.0.2]

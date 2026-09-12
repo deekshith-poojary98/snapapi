@@ -107,6 +107,11 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Optional `KEY=VALUE` file passed as `--env` when running tests. Supports `${workspaceFolder}`."
+        },
+        "snapapi.profile": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Optional environment profile passed as `--profile` (loads `environments/<name>.env`, `.snapapi/<name>.env`, or `<name>.env`)."
         }
       }
     }

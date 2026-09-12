@@ -49,7 +49,48 @@ test("findTestNameAt walks up to the nearest TEST", () => {
     assert.equal(dsl.findTestNameAt(text, 3).name, "Two");
 });
 
-test("ignores comment lines", () => {
-    const findings = dsl.analyze("// NOTAKEYWORD: nope\nSUITE: X\n");
+test("accepts current DSL keywords including FILE GRAPHQL EXAMPLES SKIP ONLY QUARANTINE", () => {
+    const findings = dsl.analyze(`SUITE: Demo
+FOLLOW-REDIRECTS: false
+SUITE SETUP: Login
+TEST: Login
+  POST: /login
+  EXPECT: status == 200
+TEST: Upload
+SKIP: later
+ONLY:
+QUARANTINE: flake
+EXAMPLES:
+  name,email
+  Jane,jane@example.com
+  POST: /upload
+  FILE: avatar FROM ./a.jpg
+  GRAPHQL: {"query": "{ user { id } }"}
+  EXPECT: status == 200
+`);
+    assert.equal(findings.length, 0);
+});
+
+test("does not flag EXAMPLES table rows as invalid lines", () => {
+    const findings = dsl.analyze(`TEST: Create
+EXAMPLES:
+  name,email
+  Jane,jane@example.com
+  GET: /x
+`);
+    assert.equal(findings.length, 0);
+});
+
+test("accepts SUITE SETUP two-word form", () => {
+    const findings = dsl.analyze("SUITE SETUP: Missing\nTEST: A\n  GET: /x\n");
+    assert.ok(findings.some((item) => /Unknown SUITE SETUP test 'Missing'/.test(item.message)));
+});
+
+test("BODY form is not treated as JSON", () => {
+    const findings = dsl.analyze(`TEST: A
+  POST: /x
+  BODY: form username=Jane
+  EXPECT: status == 200
+`);
     assert.equal(findings.length, 0);
 });

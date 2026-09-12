@@ -16,3 +16,4 @@ htmlcov/
 *.log
 .idea/
 *.vsix
+.snapapi/

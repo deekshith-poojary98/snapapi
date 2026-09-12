@@ -78,7 +78,7 @@
             "patterns": [
                 {
                     "name": "keyword.other.assertion.snaptest",
-                    "match": "(?i)\\b(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|RETRY|INLINE)\\b"
+                    "match": "(?i)\\b(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|RETRY|INLINE|OPENAPI)\\b"
                 },
                 {
                     "include": "#operators"
@@ -295,7 +295,7 @@
                     ]
                 },
                 {
-                    "begin": "^(\\s*)(DESC|URL|TIMEOUT|TAG|QUERY|PARAM|FILE|GRAPHQL|EXAMPLES|SKIP|ONLY|QUARANTINE|FOLLOW-REDIRECTS|SUITE-SETUP|SUITE-TEARDOWN)(:)",
+                    "begin": "^(\\s*)(DESC|URL|TIMEOUT|TAG|QUERY|PARAM|FILE|GRAPHQL|EXAMPLES|SKIP|ONLY|QUARANTINE|FOLLOW-REDIRECTS|SUITE-SETUP|SUITE-TEARDOWN|WAIT|SET)(:)",
                     "end": "$",
                     "beginCaptures": {
                         "2": {

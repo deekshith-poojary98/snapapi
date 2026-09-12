@@ -18,4 +18,13 @@ jobs:
       - name: Unit tests
         run: pytest
       - name: Lint sample suites
-        run: python -m snapapi lint tests/test_suite.snaptest
+        run: python -m snapapi lint tests/test_suite.snaptest tests/recommended.snaptest tests/fixtures/offline.snaptest
+      - name: Replay offline fixture
+        run: python -m snapapi run tests/fixtures/offline.snaptest --mode replay --report html:report.html
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapapi-report
+          path: report.html
+          if-no-files-found: ignore

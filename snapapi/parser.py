@@ -44,13 +44,19 @@ KNOWN_KEYWORDS = {
     "SKIP",
     "ONLY",
     "QUARANTINE",
+    "WAIT",
+    "SET",
 } | set(HTTP_METHODS)
 EXPECT_RETRY_RE = re.compile(
     r"\sRETRY\s+(\d+)(?:\s+ON\s+(\S+))?(?:\s+BACKOFF\s+(\S+))?\s*$",
     re.IGNORECASE,
 )
+WAIT_TAIL_RE = re.compile(
+    r"\sTIMEOUT\s+(\S+)(?:\s+BACKOFF\s+(\S+))?\s*$",
+    re.IGNORECASE,
+)
 EXPECT_KIND_RE = re.compile(
-    r"^(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION)(?:\s+|(?==)|$)(.*)$",
+    r"^(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|OPENAPI)(?:\s+|(?==)|$)(.*)$",
     re.IGNORECASE | re.DOTALL,
 )
 JSON_LENGTH_RE = re.compile(
@@ -104,6 +110,7 @@ class TestParser:
             "teardown": None,
             "follow_redirects": None,
             "oauth2": None,
+            "sets": [],
             "tests": [],
             "test_map": {},
             "source": filename,
@@ -196,6 +203,7 @@ class TestParser:
                     "skip": None,
                     "only": False,
                     "quarantine": None,
+                    "sets": [],
                     "source": filename,
                     "lineno": lineno,
                 }
@@ -277,6 +285,17 @@ class TestParser:
             elif keyword == "SAVE":
                 self._require_step(current_step, keyword, filename, lineno)
                 current_step["saves"].append(self._parse_save(rest, filename, lineno))
+            elif keyword == "WAIT":
+                self._require_step(current_step, keyword, filename, lineno)
+                current_step["wait"] = self._parse_wait(rest, filename, lineno)
+            elif keyword == "SET":
+                item = self._parse_set(rest, filename, lineno)
+                if current_step is not None:
+                    current_step.setdefault("sets", []).append(item)
+                elif current_test is not None:
+                    current_test.setdefault("sets", []).append(item)
+                else:
+                    suite.setdefault("sets", []).append(item)
             i += 1
 
         if current_test is not None:
@@ -356,6 +375,8 @@ class TestParser:
             "checks": [],
             "saves": [],
             "follow_redirects": None,
+            "wait": None,
+            "sets": [],
             "lineno": lineno,
         }
 
@@ -435,6 +456,20 @@ class TestParser:
                     filename=filename,
                     lineno=lineno,
                 )
+            grant = (params.get("grant") or params.get("grant_type") or "client_credentials").lower()
+            if grant == "password" and (not params.get("username") or not params.get("password")):
+                raise ParseError(
+                    "AUTH oauth2 grant=password requires username and password",
+                    filename=filename,
+                    lineno=lineno,
+                )
+            if grant not in ("password", "client_credentials"):
+                raise ParseError(
+                    "AUTH oauth2 supports grant=password or grant=client_credentials (PKCE is not implemented)",
+                    filename=filename,
+                    lineno=lineno,
+                )
+            params.setdefault("grant", grant)
             return {"_oauth2": params}
         if len(parts) != 2:
             raise ParseError(
@@ -595,6 +630,10 @@ class TestParser:
             amount = float(match.group(2))
             ms = amount if unit == "ms" else amount * 1000
             check.update({"type": "DURATION", "operator": match.group(1), "value": ms})
+        elif kind == "OPENAPI":
+            if not remainder:
+                raise ParseError("EXPECT openapi requires a spec path", filename=filename, lineno=lineno)
+            check.update({"type": "OPENAPI", "path": remainder})
         else:
             raise ParseError(f"Unknown EXPECT check '{kind}'", filename=filename, lineno=lineno)
         return check
@@ -618,6 +657,35 @@ class TestParser:
         if source == "json" and not selector.startswith("$") and selector.lower() in ("header", "cookie"):
             raise ParseError("SAVE header/cookie requires a name", filename=filename, lineno=lineno)
         return {"name": match.group(1), "source": source, "path": selector}
+
+    def _parse_wait(self, rest, filename, lineno):
+        if not rest:
+            raise ParseError("WAIT requires a check", filename=filename, lineno=lineno)
+        timeout = 10.0
+        backoff = 0.5
+        match = WAIT_TAIL_RE.search(rest)
+        if match:
+            timeout = _parse_duration_seconds(match.group(1), filename, lineno)
+            if match.group(2):
+                backoff = _parse_duration_seconds(match.group(2), filename, lineno)
+            rest = rest[: match.start()].strip()
+        check = self._parse_expect(rest, filename, lineno)
+        return {"check": check, "timeout": timeout, "backoff": backoff}
+
+    def _parse_set(self, rest, filename, lineno):
+        if not rest:
+            raise ParseError("SET requires a name and value", filename=filename, lineno=lineno)
+        parts = rest.split(None, 1)
+        if len(parts) != 2:
+            raise ParseError(
+                "SET must look like: SET: name ${uuid()}",
+                filename=filename,
+                lineno=lineno,
+            )
+        name, value = parts
+        if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
+            raise ParseError("SET name must be an identifier", filename=filename, lineno=lineno)
+        return {"name": name, "value": value}
 
     def _parse_file(self, rest, filename, lineno):
         match = FILE_RE.match(rest)
