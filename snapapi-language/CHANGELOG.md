@@ -18,6 +18,7 @@
 - **SnapAPI: Run test at cursor** via `snapapi --name`
 - Status bar and SnapAPI output channel for CLI results
 - `snapapi.cliPath`, `snapapi.envFile`, and `snapapi.profile` settings
+- Resolve `snapapi` from PATH, then the workspace `.venv` (Cursor/VS Code often omit the venv from PATH)
 - Diagnostics for FILE, GRAPHQL, EXAMPLES, SKIP, ONLY, QUARANTINE, FOLLOW-REDIRECTS, SUITE-SETUP, WAIT, SET
 - Remove Yeoman leftover docs and unused devDependencies
 

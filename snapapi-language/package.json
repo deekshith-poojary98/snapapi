@@ -102,7 +102,7 @@
         "snapapi.cliPath": {
           "type": "string",
           "default": "snapapi",
-          "markdownDescription": "Path to the SnapAPI CLI. Use `snapapi` if it is on your `PATH`, or an absolute path such as `${workspaceFolder}/.venv/bin/snapapi`."
+          "markdownDescription": "Path to the SnapAPI CLI. Leave as `snapapi` to use `PATH`, then `${workspaceFolder}/.venv/bin/snapapi`. Set an explicit path if your venv lives elsewhere."
         },
         "snapapi.envFile": {
           "type": "string",

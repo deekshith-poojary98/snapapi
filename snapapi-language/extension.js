@@ -5,6 +5,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 const vscode = require("vscode");
 const dsl = require("./lib/dsl");
+const cli = require("./lib/cli");
 
 const LANGUAGE_ID = "snaptest";
 const SUITE_EXTENSIONS = [".sapi", ".snaptest"];
@@ -336,10 +337,10 @@ function runCli(file, extraArgs, uri) {
         return Promise.resolve();
     }
     const config = vscode.workspace.getConfiguration("snapapi");
-    const cliPath = resolveSettingPath(config.get("cliPath") || "snapapi");
     const args = cliArgs(file, extraArgs);
     const folder = uri ? vscode.workspace.getWorkspaceFolder(uri) : undefined;
     const cwd = folder ? folder.uri.fsPath : path.dirname(file);
+    const cliPath = cli.resolveCliPath(resolveSettingPath(config.get("cliPath") || "snapapi"), cwd);
 
     running = true;
     statusBar.text = "$(sync~spin) SnapAPI";
@@ -360,7 +361,7 @@ function runCli(file, extraArgs, uri) {
         } catch (err) {
             running = false;
             const message = err && err.message ? err.message : String(err);
-            finishRun(1, `Failed to start ${cliPath}: ${message}`);
+            finishRun(1, startErrorMessage(cliPath, cwd, message));
             resolve();
             return;
         }
@@ -369,7 +370,7 @@ function runCli(file, extraArgs, uri) {
         child.stderr.on("data", (chunk) => outputChannel.append(chunk.toString()));
         child.on("error", (err) => {
             running = false;
-            finishRun(1, `Failed to start ${cliPath}: ${err.message}`);
+            finishRun(1, startErrorMessage(cliPath, cwd, err.message));
             resolve();
         });
         child.on("close", (code) => {
@@ -395,6 +396,13 @@ function finishRun(code, extraMessage) {
         statusBar.backgroundColor = new vscode.ThemeColor("statusBarItem.errorBackground");
     }
     updateStatusBarVisibility(vscode.window.activeTextEditor);
+}
+
+function startErrorMessage(cliPath, cwd, message) {
+    if (/ENOENT/i.test(message || "")) {
+        return cli.missingCliHint(cliPath, cwd);
+    }
+    return `Failed to start ${cliPath}: ${message}`;
 }
 
 function quoteArg(value) {

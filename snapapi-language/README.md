@@ -49,7 +49,7 @@ The CLI must be installed separately (`pip install -e .` from the repo root, or 
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `snapapi.cliPath` | `snapapi` | CLI executable. `${workspaceFolder}` is expanded. |
+| `snapapi.cliPath` | `snapapi` | CLI executable. `${workspaceFolder}` is expanded. Default `snapapi` also looks in `.venv/bin`. |
 | `snapapi.envFile` | _(empty)_ | Optional `--env` file for `${VAR}` interpolation. |
 | `snapapi.profile` | _(empty)_ | Optional `--profile` name (`environments/<name>.env`, `.snapapi/<name>.env`, or `<name>.env`). |
 
