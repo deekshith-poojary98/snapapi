@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SnapAPI — HTTP API testing DSL</title>
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
+      <div class="nav-label">Guide</div>
+      <nav>
+        <a class="active" href="index.html">Home</a>
+        <a href="index.html#why">Why SnapAPI?</a>
+        <a href="guide/install.html">Install</a>
+        <a href="guide/quick-start.html">Quick start</a>
+        <a href="guide/dsl.html">DSL reference</a>
+        <a href="guide/cli.html">CLI</a>
+        <a href="guide/ci.html">CI / reports</a>
+        <a href="guide/vscode.html">VS Code</a>
+        <a class="cta" href="playground.html">Playground</a>
+      </nav>
+      <p class="hint">Python 3.9+ CLI. The playground runs a subset of the DSL in your browser against a mock API.</p>
+    </aside>
+    <main class="content">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false">Menu</button>
+      <p class="kicker">User guide</p>
+      <h1>Write HTTP API tests as plain text, then run them.</h1>
+      <p class="lede">SnapAPI is a Python HTTP testing DSL. You author <code>.sapi</code> files with <code>GET</code>, <code>POST</code>, <code>EXPECT</code>, and <code>SAVE</code>, then run <code>snapapi file.sapi</code>. No YAML maze, no generated client. The older <code>.snaptest</code> extension still works.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="playground.html">Try it in the browser</a>
+        <a class="btn btn-ghost" href="guide/quick-start.html">Write your first suite</a>
+      </div>
+      <div class="cards">
+        <article class="card">
+          <h3>Readable DSL</h3>
+          <p>Suite, test, request, body, expects. Indentation is cosmetic. Comments are <code>//</code> lines. Modern <code>GET:</code> aliases and legacy <code>REQUEST:</code> both parse.</p>
+        </article>
+        <article class="card">
+          <h3>Checks that match real APIs</h3>
+          <p>Status, body contains, JSONPath, headers, schema, XPath, duration, and OpenAPI contract checks — plus <code>SAVE</code> into <code>${var}</code>.</p>
+        </article>
+        <article class="card">
+          <h3>Built for CI</h3>
+          <p>JUnit, HTML, and JSON reports, VCR cassettes, <code>--safe-url</code>, tag filters, retries, and a Python helper to run suites from your own code.</p>
+        </article>
+        <article class="card">
+          <h3>In-browser playground</h3>
+          <p>Type a <code>.sapi</code> suite and click Run. A client-side interpreter hits an in-memory mock so you do not need Python or a network.</p>
+        </article>
+      </div>
+
+      <h2 id="why">Why SnapAPI?</h2>
+      <p class="pitch">SnapAPI is for HTTP tests that should read like the API. The file <em>is</em> the request.</p>
+      <p>You write a suite of named tests. Each test has one or more HTTP steps, then <code>EXPECT</code> and <code>SAVE</code>. A reviewer sees the path, the body, and the checks in the same file you run.</p>
+      <div class="why-grid">
+        <article class="why">
+          <h3>The test looks like the API</h3>
+          <p>A reviewer sees <code>POST: /users</code>, <code>EXPECT: json $.email</code>, <code>SAVE: id FROM $.id</code>. The contract and the test are the same text.</p>
+        </article>
+        <article class="why">
+          <h3>HTTP primitives as keywords</h3>
+          <p>Chaining, <code>WAIT</code>, <code>EXAMPLES</code>, VCR, redacted fail dumps, curl/HAR on fail, profiles, and OpenAPI checks are keywords in the suite.</p>
+        </article>
+        <article class="why">
+          <h3>Plain text in git</h3>
+          <p><code>.sapi</code> files are text. They diff, review, and branch with the rest of the repo.</p>
+        </article>
+        <article class="why">
+          <h3>Shared by the people who own the API</h3>
+          <p>SDETs and backend reviewers can write and review the same files. The suite is the contract.</p>
+        </article>
+      </div>
+      <h3>When it fits</h3>
+      <ul>
+        <li>The test <em>is</em> the HTTP call</li>
+        <li>You want smoke and regression that reviews as the contract</li>
+        <li>QA and backend share the same files</li>
+        <li>You want to run those files from the CLI, or from Python with <code>run_suites</code></li>
+      </ul>
+
+      <h2>Thirty-second example</h2>
+      <pre><code class="language-snaptest">SUITE: Book Store
+DESC: Validates the user API
+URL: https://api.example.com
+HEADER Content-Type: application/json
+
+TEST: Create User
+  POST: /users
+  AUTH: bearer ${TOKEN}
+  BODY: {"name": "Jane", "email": "jane@example.com"}
+  EXPECT: status == 201
+  SAVE: userId FROM $.id
+
+TEST: Get User
+SETUP: Create User
+  GET: /users/${userId}
+  EXPECT: status == 200
+  EXPECT: json $.email == "jane@example.com"</code></pre>
+      <p>On your machine that file is executed by the <code>snapapi</code> CLI. In this guide, the <a href="playground.html">playground</a> runs the same shape of suite against a built-in mock at <code>/api/users</code>.</p>
+      <h2>What SnapAPI is not</h2>
+      <p>There is no language server, gRPC, or WebSocket support. OpenAPI smoke generation and contract checks exist; they do not replace a full spec toolchain. The playground implements a <strong>useful subset</strong> of the DSL — FILE, GRAPHQL, IMPORT, oauth2, schema, and XPath still need the Python CLI.</p>
+      <div class="page-nav">
+        <span></span>
+        <a href="guide/install.html"><span>Next</span>Install</a>
+      </div>
+    </main>
+  </div>
+  <script src="assets/highlight.js"></script>
+  <script src="assets/site.js"></script>
+</body>
+</html>

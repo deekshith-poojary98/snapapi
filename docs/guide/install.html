@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Install — SnapAPI</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
+      <div class="nav-label">Guide</div>
+      <nav>
+        <a href="../index.html">Home</a>
+        <a href="../index.html#why">Why SnapAPI?</a>
+        <a class="active" href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="dsl.html">DSL reference</a>
+        <a href="cli.html">CLI</a>
+        <a href="ci.html">CI / reports</a>
+        <a href="vscode.html">VS Code</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">Python 3.9 or newer. Editable install is the supported development path.</p>
+    </aside>
+    <main class="content">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu>Menu</button>
+      <p class="kicker">Getting started</p>
+      <h1>Install SnapAPI</h1>
+      <p class="lede">SnapAPI is a Python package with a <code>snapapi</code> console script. Use a virtualenv so the CLI stays on a known interpreter.</p>
+
+      <h2>From this repository</h2>
+      <pre><code class="language-bash">git clone https://github.com/Deekshith-07/snapapi.git
+cd snapapi
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"</code></pre>
+      <p><code>.[dev]</code> adds this repository’s test extras. The <code>watch</code> extra is optional and pulls in <code>watchdog</code> for <code>snapapi watch</code>.</p>
+      <pre><code class="language-bash">pip install -e ".[watch]"</code></pre>
+
+      <h2>Pinned runtime dependencies</h2>
+      <p>If you want the lock-style requirements file instead of the extra:</p>
+      <pre><code class="language-bash">pip install -r requirements.txt
+pip install -e .</code></pre>
+
+      <h2>Confirm the CLI</h2>
+      <pre><code class="language-bash">snapapi --help
+python -m snapapi --help</code></pre>
+      <p>The process is the same either way. Exit codes: <code>0</code> all tests passed, <code>1</code> a test failed, <code>2</code> parse or usage error.</p>
+
+      <h2>Requirements</h2>
+      <ul>
+        <li>Python 3.9 or newer</li>
+        <li>Runtime: <code>requests</code>, <code>colorama</code>, <code>jsonschema</code>, <code>PyYAML</code></li>
+      </ul>
+      <div class="callout">You can skip install entirely and <a href="../playground.html">run suites in the playground</a>. The playground is a JavaScript interpreter plus an in-memory mock; it is not a substitute for CI.</div>
+
+      <div class="page-nav">
+        <a href="../index.html"><span>Previous</span>Home</a>
+        <a href="quick-start.html"><span>Next</span>Quick start</a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

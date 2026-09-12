@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CI / reports — SnapAPI</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
+      <div class="nav-label">Guide</div>
+      <nav>
+        <a href="../index.html">Home</a>
+        <a href="../index.html#why">Why SnapAPI?</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="dsl.html">DSL reference</a>
+        <a href="cli.html">CLI</a>
+        <a class="active" href="ci.html">CI / reports</a>
+        <a href="vscode.html">VS Code</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">JUnit for the test UI, HTML for humans, VCR when the network should stay off.</p>
+    </aside>
+    <main class="content">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu>Menu</button>
+      <p class="kicker">CI</p>
+      <h1>CI, reports, and VCR</h1>
+      <p class="lede">Treat SnapAPI like any other test runner: install in a venv, point it at <code>.sapi</code> files, publish artifacts, and keep outbound URLs honest.</p>
+
+      <h2>Example job</h2>
+      <pre><code class="language-bash">python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+snapapi tests \
+  --report junit:report.xml \
+  --report html:report.html \
+  --safe-url</code></pre>
+      <p>Exit <code>0</code> when every test passed, <code>1</code> when a test failed, <code>2</code> on parse or usage errors. Upload <code>report.xml</code> to the CI test reporter and <code>report.html</code> as a build artifact.</p>
+
+      <h2>Report kinds</h2>
+      <table>
+        <thead><tr><th>Flag</th><th>Output</th></tr></thead>
+        <tbody>
+          <tr><td><code>--report json:report.json</code></td><td>Machine-readable suite/test payload, including request summaries.</td></tr>
+          <tr><td><code>--report junit:report.xml</code></td><td>JUnit XML (<code>testsuites</code> / <code>testcase</code>). Failures carry the SnapAPI error message.</td></tr>
+          <tr><td><code>--report html:report.html</code></td><td>Self-contained HTML with redacted request/response bodies.</td></tr>
+        </tbody>
+      </table>
+      <p>Repeat <code>--report</code> to write more than one format in a single run.</p>
+
+      <h2>VCR cassettes</h2>
+      <p>Cassettes live under <code>.snapapi/cassettes/</code>. Keys include method, path, and (by default) sorted query string, <code>Content-Type</code> / <code>Accept</code>, and body.</p>
+      <pre><code class="language-bash">snapapi tests/offline.snaptest --mode record
+snapapi tests/offline.snaptest --mode replay
+snapapi tests/offline.snaptest --mode record-on-miss</code></pre>
+      <ul>
+        <li><code>record</code> hits the network and writes cassettes.</li>
+        <li><code>replay</code> never hits the network; a missing cassette is an error unless <code>--record-on-miss</code>.</li>
+        <li><code>record-on-miss</code> is replay plus save-on-miss.</li>
+      </ul>
+      <p>Override identity fields with <code>--vcr-match authorization,query</code> or suite <code>OPTIONS: {"VCR-MATCH": ["query","body","accept","authorization"]}</code>. Replay restores <code>Set-Cookie</code> onto the session. Commit cassettes for offline CI; do not commit secrets — HTML reports and dumps redact sensitive fields, but review cassette JSON before you push.</p>
+
+      <h2><code>--safe-url</code></h2>
+      <p>Blocks private and metadata hosts (loopback, RFC1918, link-local, cloud metadata). Use it in CI when suites interpolate <code>${URL}</code> from the environment so a typo cannot scan the job network. Combine with an allow-listed public API or a mock that the job itself starts:</p>
+      <pre><code class="language-bash">snapapi mock tests/fixtures/mock.json --port 8765 &amp;
+export BASE_URL=http://127.0.0.1:8765
+snapapi tests/recommended.snaptest</code></pre>
+      <p>Local mocks are private URLs; do not pass <code>--safe-url</code> against them unless you also pass <code>--allow-private-urls</code>. For third-party APIs in CI, <code>--safe-url</code> is the right default.</p>
+
+      <h2>This repository</h2>
+      <p>Automated checks in this repo use a local mock HTTP server and do not call public APIs. A checked-in cassette covers the offline fixture. CI should run <code>snapapi lint</code> on your suites and <code>snapapi</code> with <code>--mode replay</code> when cassettes are committed.</p>
+      <div class="page-nav">
+        <a href="cli.html"><span>Previous</span>CLI</a>
+        <a href="vscode.html"><span>Next</span>VS Code</a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

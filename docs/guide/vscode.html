@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VS Code — SnapAPI</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
+      <div class="nav-label">Guide</div>
+      <nav>
+        <a href="../index.html">Home</a>
+        <a href="../index.html#why">Why SnapAPI?</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="dsl.html">DSL reference</a>
+        <a href="cli.html">CLI</a>
+        <a href="ci.html">CI / reports</a>
+        <a class="active" href="vscode.html">VS Code</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">The language pack lives in snapapi-language/. There is no separate language-server process.</p>
+    </aside>
+    <main class="content">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu>Menu</button>
+      <p class="kicker">Editor</p>
+      <h1>VS Code / Cursor</h1>
+      <p class="lede">The <code>snapapi-language</code> folder is a VS Code extension for <code>.sapi</code> files: syntax highlighting, snippets, completions, lightweight diagnostics, and run commands that shell out to the CLI. The older <code>.snaptest</code> extension is still associated.</p>
+
+      <h2>What you get</h2>
+      <ul>
+        <li>Highlighting for current and legacy keywords, HTTP method aliases, <code>${VAR}</code>, JSON bodies, and <code>//</code> comments</li>
+        <li>Snippets for a suite skeleton, GET/POST tests, EXPECT variants, SAVE, AUTH, HEADER, and QUERY</li>
+        <li>Keyword completions, plus test-name completions after <code>SETUP:</code> / <code>TEARDOWN:</code> / <code>SUITE-SETUP:</code> / <code>SUITE-TEARDOWN:</code> / <code>DEPENDS:</code></li>
+        <li>Diagnostics on edit/save: unknown keywords, missing request paths, unknown SETUP/TEARDOWN/SUITE-SETUP/DEPENDS names (including cheap <code>IMPORT</code> resolution), <code>HEAD:</code> paths, and <code>REQUEST: OPTIONS /path</code></li>
+        <li><strong>SnapAPI: Run current file</strong> and <strong>Run test at cursor</strong> (the latter passes <code>snapapi --name</code>)</li>
+      </ul>
+
+      <h2>Install from this repo (debug)</h2>
+      <ol>
+        <li>Open the <code>snapapi-language</code> folder in VS Code or Cursor.</li>
+        <li>Press <kbd>F5</kbd> to launch an Extension Development Host.</li>
+        <li>Open a <code>.sapi</code> file.</li>
+      </ol>
+      <p>If the workspace is the SnapAPI repo root, set the launch argument to <code>--extensionDevelopmentPath=${workspaceFolder}/snapapi-language</code>.</p>
+
+      <h2>Copy into extensions</h2>
+      <pre><code class="language-bash">cp -R snapapi-language ~/.vscode/extensions/deekshithpoojary.snapapi-language-0.1.0</code></pre>
+      <p>Restart the editor. For Cursor, use <code>~/.cursor/extensions/</code> instead.</p>
+
+      <h2>VSIX</h2>
+      <pre><code class="language-bash">cd snapapi-language
+npx @vscode/vsce package
+code --install-extension snapapi-language-0.1.0.vsix</code></pre>
+      <p>The CLI must be installed separately (<code>pip install -e .</code> from the repo root, or put <code>snapapi</code> on <code>PATH</code>).</p>
+
+      <h2>Settings</h2>
+      <table>
+        <thead><tr><th>Setting</th><th>Default</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>snapapi.cliPath</code></td><td><code>snapapi</code></td><td>CLI executable. <code>${workspaceFolder}</code> is expanded.</td></tr>
+          <tr><td><code>snapapi.envFile</code></td><td>empty</td><td>Optional <code>--env</code> file for interpolation.</td></tr>
+          <tr><td><code>snapapi.profile</code></td><td>empty</td><td>Optional <code>--profile</code> name.</td></tr>
+        </tbody>
+      </table>
+      <pre><code class="language-json">{
+  "snapapi.cliPath": "${workspaceFolder}/.venv/bin/snapapi",
+  "snapapi.envFile": "${workspaceFolder}/.env"
+}</code></pre>
+
+      <h2>Run current file</h2>
+      <p>With a <code>.sapi</code> editor focused, run <strong>SnapAPI: Run current file</strong> from the command palette. The file is saved, then the extension runs <code>snapapi &lt;file&gt;</code>. <strong>Run test at cursor</strong> uses the nearest <code>TEST:</code> above the cursor and passes <code>--name</code>. Output goes to the SnapAPI channel; the status bar shows the last result while a <code>.sapi</code> file is active.</p>
+      <div class="callout">The playground does not use the extension. Use it to learn the DSL; use the CLI (or these commands) for real HTTP.</div>
+      <div class="page-nav">
+        <a href="ci.html"><span>Previous</span>CI / reports</a>
+        <a href="../playground.html"><span>Next</span>Playground</a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

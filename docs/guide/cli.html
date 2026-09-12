@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CLI — SnapAPI</title>
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
+      <div class="nav-label">Guide</div>
+      <nav>
+        <a href="../index.html">Home</a>
+        <a href="../index.html#why">Why SnapAPI?</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="dsl.html">DSL reference</a>
+        <a class="active" href="cli.html">CLI</a>
+        <a href="ci.html">CI / reports</a>
+        <a href="vscode.html">VS Code</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">snapapi file.sapi is the default command. Subcommands: lint, fmt, openapi, history, mock, watch. --listener attaches Python reporters.</p>
+    </aside>
+    <main class="content">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu>Menu</button>
+      <p class="kicker">Tooling</p>
+      <h1>CLI</h1>
+      <p class="lede">The console script is <code>snapapi</code>. A path with no subcommand is treated as <code>run</code>. Selection and output flags follow pytest and Robot Framework where they fit: <code>-k</code>/<code>-m</code>, <code>-x</code>, <code>--maxfail</code>, <code>--lf</code>/<code>--ff</code>, <code>--collect-only</code>, <code>-q</code>/<code>-v</code>, <code>--exclude</code>, and <code>-D</code>.</p>
+      <pre><code class="language-bash">snapapi path/to/file.sapi
+python -m snapapi path/to/file.sapi
+snapapi tests/ suites/auth.sapi</code></pre>
+
+      <h2>run (default)</h2>
+      <table>
+        <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>-k "Login or not Health"</code></td><td>Pytest-style keyword expression on name, description, and tags. <code>and</code>/<code>or</code>/<code>not</code> and parentheses. Adjacent words are AND.</td></tr>
+          <tr><td><code>-m "smoke and not slow"</code></td><td>Pytest-style tag expression.</td></tr>
+          <tr><td><code>--tag user</code></td><td>Run tests that have this tag (repeatable; all given tags must match).</td></tr>
+          <tr><td><code>--exclude slow</code></td><td>Skip tests with this tag (Robot <code>--exclude</code>; repeatable).</td></tr>
+          <tr><td><code>--name "Create User"</code></td><td>Run tests with this name (repeatable).</td></tr>
+          <tr><td><code>--grep regex</code></td><td>Filter tests by name or description.</td></tr>
+          <tr><td><code>-D TOKEN=secret</code> / <code>--variable</code></td><td>Set <code>${VAR}</code> without an env file (Robot-style). Repeatable; overrides <code>--profile</code>.</td></tr>
+          <tr><td><code>--env .env</code></td><td>Load <code>KEY=VALUE</code> pairs for <code>${VAR}</code> interpolation.</td></tr>
+          <tr><td><code>--profile stage</code></td><td>Load <code>environments/stage.env</code>, <code>.snapapi/stage.env</code>, or <code>stage.env</code>.</td></tr>
+          <tr><td><code>--timeout 10</code></td><td>HTTP timeout in seconds (overrides suite <code>TIMEOUT</code>).</td></tr>
+          <tr><td><code>-x</code> / <code>--exitfirst</code> / <code>--stop-on-failure</code></td><td>Stop each suite on the first failed test (pytest <code>-x</code>). Off by default: remaining tests keep running after a failure.</td></tr>
+          <tr><td><code>--maxfail N</code></td><td>Stop after N failures (pytest <code>--maxfail</code>).</td></tr>
+          <tr><td><code>--lf</code> / <code>--last-failed</code></td><td>Re-run failures from <code>.snapapi/last-run.json</code> (file + suite + name, including <code>Test [row]</code>).</td></tr>
+          <tr><td><code>--ff</code> / <code>--failed-first</code></td><td>Run last-failed tests first, then the rest.</td></tr>
+          <tr><td><code>--collect-only</code> / <code>--co</code> / <code>--dry-run</code></td><td>Print selected tests without HTTP (pytest <code>--collect-only</code>, Robot <code>--dryrun</code>).</td></tr>
+          <tr><td><code>-q</code> / <code>-v</code></td><td>Quiet (summary only) or verbose. Repeatable.</td></tr>
+          <tr><td><code>--durations N</code></td><td>Show the N slowest tests after the run (<code>0</code> = all).</td></tr>
+          <tr><td><code>--color yes|no|auto</code> / <code>--no-color</code></td><td>Force or disable ANSI color.</td></tr>
+          <tr><td><code>--workers N</code></td><td>Run independent tests in parallel. SAVE is isolated per test; sibling SAVE falls back to sequential.</td></tr>
+          <tr><td><code>--reruns N</code></td><td>Re-run failed tests up to N times (distinct from <code>EXPECT RETRY</code>).</td></tr>
+          <tr><td><code>--include-skipped</code> / <code>--include-quarantine</code></td><td>Run tests marked SKIP or QUARANTINE.</td></tr>
+          <tr><td><code>--mode record|replay|record-on-miss</code></td><td>VCR cassettes under <code>.snapapi/cassettes/</code>.</td></tr>
+          <tr><td><code>--record-on-miss</code></td><td>With replay, hit the network and save when a cassette is missing.</td></tr>
+          <tr><td><code>--vcr-match query,body,accept,authorization</code></td><td>Cassette identity fields (default: query, content-type, accept, body).</td></tr>
+          <tr><td><code>--contract-strict</code></td><td>Fail when an OpenAPI path/method/schema is missing (default: skip/warn).</td></tr>
+          <tr><td><code>--report json:file</code> / <code>junit:</code> / <code>html:</code></td><td>Write reports. Repeatable.</td></tr>
+          <tr><td><code>--on-fail curl</code> / <code>--on-fail har:dir</code></td><td>Emit a redacted curl or HAR on failure.</td></tr>
+          <tr><td><code>--no-dump</code></td><td>Do not print request/response on failure.</td></tr>
+          <tr><td><code>--safe-url</code></td><td>Block private/metadata hosts.</td></tr>
+          <tr><td><code>--allow-private-urls</code></td><td>Override <code>--safe-url</code>.</td></tr>
+          <tr><td><code>--proxy URL</code></td><td>HTTP/HTTPS proxy.</td></tr>
+          <tr><td><code>--insecure</code></td><td>Skip TLS certificate verification.</td></tr>
+          <tr><td><code>--cert PATH</code> / <code>--cacert PATH</code></td><td>Client certificate and CA bundle.</td></tr>
+          <tr><td><code>-V</code> / <code>--version</code></td><td>Print the SnapAPI version.</td></tr>
+        </tbody>
+      </table>
+
+      <h2>lint</h2>
+      <p>Parse and validate without making HTTP calls.</p>
+      <pre><code class="language-bash">snapapi lint tests/
+snapapi lint users.sapi --strict</code></pre>
+      <p><code>--strict</code> treats unused SAVE as errors. <code>--env</code> and <code>--profile</code> are available so interpolation can be checked. Exit <code>2</code> if any issue is an error.</p>
+
+      <h2>fmt</h2>
+      <pre><code class="language-bash">snapapi fmt tests/
+snapapi fmt users.sapi --check</code></pre>
+      <p>Rewrites <code>.sapi</code> files. <code>--check</code> exits <code>1</code> if a file would change.</p>
+
+      <h2>openapi</h2>
+      <p>Generate GET/POST/PUT/PATCH/DELETE smoke tests from an OpenAPI spec.</p>
+      <pre><code class="language-bash">snapapi openapi spec.yaml --base-url https://api.example.com -o smoke.sapi</code></pre>
+      <p>Without <code>-o</code>, the suite is printed to stdout.</p>
+
+      <h2>history</h2>
+      <pre><code class="language-bash">snapapi history
+snapapi history --failed --since 7d</code></pre>
+      <p>Reads <code>.snapapi/history.jsonl</code>. <code>--since</code> accepts values like <code>7d</code>, <code>24h</code>, or <code>30m</code>.</p>
+
+      <h2>mock</h2>
+      <pre><code class="language-bash">snapapi mock tests/fixtures/mock.json --port 0</code></pre>
+      <p>Serves routes from a JSON file and prints the URL. Routes may use path templates (<code>/users/{id}</code>), optional <code>match.query</code> / <code>match.body</code> subsets, and <code>delay_ms</code>. Exact paths win over templates.</p>
+
+      <h2>watch</h2>
+      <pre><code class="language-bash">snapapi watch tests/ --interval 0.5
+snapapi watch tests/ --tag users</code></pre>
+      <p>Re-runs when <code>.sapi</code> or <code>.snaptest</code> files change (poll). Install <code>pip install -e ".[watch]"</code> for a <code>watchdog</code> observer. All run flags are accepted.</p>
+
+      <h2>Listeners</h2>
+      <p>A listener is a Python class (or module) with optional methods. SnapAPI calls the ones you implement. Listener exceptions are warnings; they do not change the suite result.</p>
+      <pre><code class="language-bash">snapapi tests/ --listener reporters/jira.py:JiraReporter
+snapapi tests/ --listener examples/print_listener.py:PrintListener --report html:report.html</code></pre>
+      <pre><code class="language-python">class JiraReporter:
+    def start_suite(self, suite):
+        ...  # suite["name"], suite["source"]
+
+    def start_test(self, suite, name, tags):
+        ...
+
+    def end_test(self, suite, test):
+        ...  # test.name, test.status, test.error, test.tags, test.requests
+
+    def end_suite(self, result):
+        ...  # result.to_dict()
+
+    def report_written(self, kind, path):
+        ...  # kind is html, json, or junit
+
+    def close(self):
+        ...</code></pre>
+      <p>From Python, pass instances to <code>run_suites(..., listeners=[JiraReporter()], close_listeners=True)</code>. The CLI writes reports, then calls <code>report_written</code>, then <code>close</code>.</p>
+
+      <h2>From Python</h2>
+      <p>Call the same runner the CLI uses:</p>
+      <pre><code class="language-python">from snapapi.cli import run_suites
+
+results = run_suites(["tests/foo.sapi"])
+assert all(suite.ok for suite in results)</code></pre>
+      <p><code>run_suites</code> accepts the same options as <code>snapapi run</code> (tags, names, env file, timeout, workers, VCR mode, and the rest) as keyword arguments. It returns a list of suite results.</p>
+      <div class="page-nav">
+        <a href="dsl.html"><span>Previous</span>DSL reference</a>
+        <a href="ci.html"><span>Next</span>CI / reports</a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

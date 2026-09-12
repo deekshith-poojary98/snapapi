@@ -12,6 +12,7 @@ build/
 .coverage
 htmlcov/
 .env
+examples/*.env
 .DS_Store
 *.log
 .idea/
