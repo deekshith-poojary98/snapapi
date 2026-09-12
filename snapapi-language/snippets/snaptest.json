@@ -136,7 +136,7 @@
     "DEPENDS": {
         "prefix": "DEPENDS",
         "body": "DEPENDS: ${1:Create User}",
-        "description": "Skip this test if named tests failed or skipped"
+        "description": "Run named tests first; skip this test if they failed or skipped"
     },
     "IMPORT": {
         "prefix": "IMPORT",

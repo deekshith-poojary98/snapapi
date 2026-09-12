@@ -5,7 +5,7 @@
 - Associate `.sapi` as the short suite extension (`.snaptest` still works)
 - Reject space-separated keywords (`SUITE SETUP`); only `SUITE-SETUP` / `SUITE-TEARDOWN`
 - Drop `STOP-ON-FAILURE` as a keyword (CLI `-x` / `--stop-on-failure` only)
-- Highlight and complete `DEPENDS`
+- Highlight and complete `DEPENDS` (named tests run first)
 - Add `HELPER` for named setup/teardown procedures (not test cases)
 
 ## [0.1.0]

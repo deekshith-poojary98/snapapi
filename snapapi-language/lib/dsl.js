@@ -60,7 +60,7 @@ const KEYWORD_COMPLETIONS = [
     { label: "TAG", detail: "Tags for the current test" },
     { label: "SETUP", detail: "Run a HELPER or TEST first" },
     { label: "TEARDOWN", detail: "Run a HELPER or TEST after" },
-    { label: "DEPENDS", detail: "Skip this test if named tests failed or skipped" },
+    { label: "DEPENDS", detail: "Run named tests first; skip this test if they failed or skipped" },
     { label: "SKIP", detail: "Skip this test" },
     { label: "ONLY", detail: "Run only this test" },
     { label: "QUARANTINE", detail: "Quarantine this test" },
