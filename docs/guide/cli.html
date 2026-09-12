@@ -55,7 +55,7 @@ snapapi tests/ suites/auth.sapi</code></pre>
           <tr><td><code>-q</code> / <code>-v</code></td><td>Quiet (summary only) or verbose. Repeatable.</td></tr>
           <tr><td><code>--durations N</code></td><td>Show the N slowest tests after the run (<code>0</code> = all).</td></tr>
           <tr><td><code>--color yes|no|auto</code> / <code>--no-color</code></td><td>Force or disable ANSI color.</td></tr>
-          <tr><td><code>--workers N</code></td><td>Run independent tests in parallel. SAVE is isolated per test; sibling SAVE falls back to sequential.</td></tr>
+          <tr><td><code>--workers N</code></td><td>Run independent tests in parallel. SAVE is isolated per test; sibling SAVE or any <code>DEPENDS</code> falls back to sequential. <code>DEPENDS</code> also pulls named tests forward (file order otherwise).</td></tr>
           <tr><td><code>--reruns N</code></td><td>Re-run failed tests up to N times (distinct from <code>EXPECT RETRY</code>).</td></tr>
           <tr><td><code>--include-skipped</code> / <code>--include-quarantine</code></td><td>Run tests marked SKIP or QUARANTINE.</td></tr>
           <tr><td><code>--mode record|replay|record-on-miss</code></td><td>VCR cassettes under <code>.snapapi/cassettes/</code>.</td></tr>

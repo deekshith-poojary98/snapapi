@@ -146,6 +146,26 @@ DEPENDS: Create User
 `);
   assert(passed.ok, "both should pass\n" + passed.text);
   assert(passed.passed === 2, "expected 2 passed, got " + passed.passed);
+
+  const reordered = await pg.runText(`
+SUITE: Depends order
+URL: mock://
+TEST: tc1
+  GET: /api/users
+  EXPECT: status == 200
+TEST: tc2
+DEPENDS: tc3
+  GET: /api/users
+  EXPECT: status == 200
+TEST: tc3
+  GET: /health
+  EXPECT: status == 200
+`);
+  assert(reordered.ok, "reordered suite should pass\n" + reordered.text);
+  const i1 = reordered.text.indexOf("tc1");
+  const i3 = reordered.text.indexOf("tc3");
+  const i2 = reordered.text.indexOf("tc2");
+  assert(i1 >= 0 && i3 > i1 && i2 > i3, "expected tc1, tc3, tc2; got\n" + reordered.text);
 }
 
 async function testHelper() {

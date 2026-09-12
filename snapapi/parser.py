@@ -318,6 +318,7 @@ class TestParser:
                 raise ParseError(unknown_keyword_message(keyword), filename=filename, lineno=lineno)
 
             if keyword == "SUITE":
+                current_test, current_step = self._close_open_helper(current_test, current_step, tests)
                 self._require_no_test(current_test, keyword, filename, lineno)
                 suite["name"] = rest
             elif keyword == "DESC":
@@ -331,6 +332,7 @@ class TestParser:
                 else:
                     suite["base_url"] = rest
             elif keyword == "OPTIONS":
+                current_test, current_step = self._close_open_helper(current_test, current_step, tests)
                 self._require_no_test(current_test, keyword, filename, lineno)
                 payload, i = self._read_json(rest, lines, i, filename, lineno)
                 if not isinstance(payload, dict):
@@ -339,6 +341,7 @@ class TestParser:
                 payload.pop("STOP-ON-FAILURE", None)
                 suite["options"].update(payload)
             elif keyword == "TIMEOUT":
+                current_test, current_step = self._close_open_helper(current_test, current_step, tests)
                 self._require_no_test(current_test, keyword, filename, lineno)
                 suite["options"]["TIMEOUT"] = self._parse_timeout(rest, filename, lineno)
             elif keyword == "FOLLOW-REDIRECTS":
@@ -346,16 +349,20 @@ class TestParser:
                 if current_step is not None:
                     current_step["follow_redirects"] = value
                 else:
+                    current_test, current_step = self._close_open_helper(current_test, current_step, tests)
                     self._require_no_test(current_test, keyword, filename, lineno)
                     suite["follow_redirects"] = value
                     suite["options"]["FOLLOW-REDIRECTS"] = value
             elif keyword == "SUITE-SETUP":
+                current_test, current_step = self._close_open_helper(current_test, current_step, tests)
                 self._require_no_test(current_test, keyword, filename, lineno)
                 suite["setup"] = rest
             elif keyword == "SUITE-TEARDOWN":
+                current_test, current_step = self._close_open_helper(current_test, current_step, tests)
                 self._require_no_test(current_test, keyword, filename, lineno)
                 suite["teardown"] = rest
             elif keyword == "IMPORT":
+                current_test, current_step = self._close_open_helper(current_test, current_step, tests)
                 self._require_no_test(current_test, keyword, filename, lineno)
                 imported = self._import_file(rest, filename, lineno, import_stack)
                 self._merge_imported(suite, tests, test_map, imported, filename, lineno)
@@ -1111,6 +1118,12 @@ class TestParser:
                 filename=filename,
                 lineno=lineno,
             )
+
+    def _close_open_helper(self, current_test, current_step, tests):
+        if current_test is not None and current_test.get("kind") == "helper":
+            tests.append(current_test)
+            return None, None
+        return current_test, current_step
 
     def _require_no_test(self, current_test, keyword, filename, lineno):
         if current_test is not None:

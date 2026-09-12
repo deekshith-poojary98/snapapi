@@ -546,8 +546,16 @@
     function requireStep(keyword, lineno) {
       if (!currentStep) throw new ParseError(keyword + " must follow a REQUEST", lineno);
     }
+    function closeOpenHelper() {
+      if (currentTest && currentTest.kind === "helper") {
+        tests.push(currentTest);
+        currentTest = null;
+        currentStep = null;
+      }
+    }
     function requireNoTest(keyword, lineno) {
-      if (currentTest) throw new ParseError(keyword + " must appear at suite level (before TEST or HELPER)", lineno);
+      closeOpenHelper();
+      if (currentTest) throw new ParseError(keyword + " must appear at suite level (before TEST)", lineno);
     }
 
     while (i < lines.length) {
@@ -1329,6 +1337,32 @@
     Object.keys(testMap).forEach(visit);
   }
 
+  function orderByDepends(tests) {
+    var hasDepends = tests.some(function (test) { return (test.depends || []).length; });
+    if (!hasDepends) return tests;
+    var byName = {};
+    var index = {};
+    tests.forEach(function (test, i) {
+      byName[test.name] = test;
+      index[test.name] = i;
+    });
+    var seen = {};
+    var visiting = {};
+    var ordered = [];
+    function visit(name) {
+      if (seen[name] || !byName[name] || visiting[name]) return;
+      visiting[name] = 1;
+      var deps = (byName[name].depends || []).filter(function (dep) { return byName[dep]; });
+      deps.sort(function (a, b) { return index[a] - index[b]; });
+      deps.forEach(visit);
+      delete visiting[name];
+      seen[name] = 1;
+      ordered.push(byName[name]);
+    }
+    tests.forEach(function (test) { visit(test.name); });
+    return ordered;
+  }
+
   function dependsReason(test, depStatus) {
     var deps = test.depends || [];
     for (var i = 0; i < deps.length; i++) {
@@ -1514,7 +1548,7 @@
       }
     }
 
-    var primaries = suite.tests.filter(function (test) { return !helpers[test.name]; });
+    var primaries = orderByDepends(suite.tests.filter(function (test) { return !helpers[test.name]; }));
     for (var p = 0; p < primaries.length; p++) {
       var test = primaries[p];
       var depReason = dependsReason(test, depStatus);

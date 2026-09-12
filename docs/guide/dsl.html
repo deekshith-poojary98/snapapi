@@ -89,7 +89,7 @@ Bob,bob@example.com
           <tr><td><code>TEST</code></td><td>A case that runs and is counted. Names referenced by SETUP/TEARDOWN/DEPENDS must exist.</td></tr>
           <tr><td><code>TAG</code></td><td>Space- or comma-separated tags. CLI <code>--tag</code> requires all given tags to match.</td></tr>
           <tr><td><code>SETUP</code> / <code>TEARDOWN</code></td><td>Name a <code>HELPER</code> or <code>TEST</code>. Those procedures are not counted as cases. Cycles are parse errors.</td></tr>
-          <tr><td><code>DEPENDS</code></td><td>Name one or more primary tests (comma-separated). If any failed, skipped, or has not run, this test is skipped with that reason. Cannot target a <code>HELPER</code>.</td></tr>
+          <tr><td><code>DEPENDS</code></td><td>Name one or more primary tests (comma-separated). SnapAPI runs those tests first (file order otherwise). If any failed, skipped, or was not selected, this test is skipped with that reason. Cannot target a <code>HELPER</code>.</td></tr>
           <tr><td><code>EXAMPLES</code></td><td>Inline CSV (header + rows) or a <code>.csv</code> path. Each row becomes <code>Test [first-cell]</code> with those variables. Playground supports inline tables only.</td></tr>
           <tr><td><code>SKIP</code> / <code>ONLY</code> / <code>QUARANTINE</code></td><td>CLI filters. Not implemented in the playground (you get a clear error).</td></tr>
           <tr><td><code>SET</code></td><td>Test-scoped assignment, interpolated before steps.</td></tr>

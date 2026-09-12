@@ -1,7 +1,9 @@
 # SnapAPI
 
 SnapAPI is a lightweight HTTP API testing framework with a small custom DSL.
-Write `.snaptest` files, then run them from the CLI.
+Write `.sapi` files, then run them from the CLI. The older `.snaptest` extension still works.
+
+**[User guide](docs/index.html)** — install, DSL reference, CLI, CI, VS Code, and an in-browser **[playground](docs/playground.html)** (no Python required). Open `docs/index.html` in a browser; there is no build step.
 
 ## Features
 
@@ -13,7 +15,7 @@ Write `.snaptest` files, then run them from the CLI.
 - Env files, tag filters, timeouts, retries, JSON and JUnit reports
 - OpenAPI response/request contract checks, VCR cassettes, JSON mock server
 - pytest plugin (`snapapi_run` / `@pytest.mark.snapapi`)
-- VS Code syntax highlighting and diagnostics for `.snaptest` files
+- VS Code syntax highlighting and diagnostics for `.sapi` files
 
 ## Requirements
 
@@ -39,38 +41,48 @@ pip install -e .
 ## CLI
 
 ```bash
-snapapi path/to/file.snaptest
-python -m snapapi path/to/file.snaptest
+snapapi path/to/file.sapi
+python -m snapapi path/to/file.sapi
 ```
 
-Pass multiple files or a directory of `.snaptest` files:
+Pass multiple files or a directory of `.sapi` files:
 
 ```bash
 snapapi tests/test_suite.snaptest
-snapapi tests/ suites/auth.snaptest
+snapapi tests/ suites/auth.sapi
 ```
 
 Options:
 
 | Flag | Meaning |
 | --- | --- |
+| `-k "Login or not Health"` | Pytest-style keyword expression on name/description/tags |
+| `-m "smoke and not slow"` | Pytest-style tag expression |
 | `--tag user` | Run tests that have this tag (repeatable; all given tags must match) |
+| `--exclude slow` | Skip tests with this tag (repeatable) |
 | `--name "Create User"` | Run tests with this name (repeatable) |
 | `--env .env` | Load `KEY=VALUE` pairs for `${VAR}` interpolation |
+| `-D TOKEN=secret` | Set `${VAR}` from the CLI (repeatable) |
 | `--timeout 10` | HTTP timeout in seconds (overrides `TIMEOUT`) |
 | `--report json:report.json` | Write a JSON report |
 | `--report junit:report.xml` | Write a JUnit XML report |
 | `--report html:report.html` | Write a self-contained HTML report |
-| `--stop-on-failure` | Stop each suite on the first failed test |
+| `-x` / `--exitfirst` / `--stop-on-failure` | Stop each suite on the first failed test (off by default) |
+| `--maxfail N` | Stop after N failures |
+| `--collect-only` | List selected tests without HTTP |
+| `-q` / `-v` | Quiet or verbose console |
+| `--durations N` | Show the N slowest tests |
 | `--profile stage` | Load `environments/stage.env`, `.snapapi/stage.env`, or `stage.env` |
 | `--workers N` | Run independent tests in parallel (SAVE is isolated per test; sibling SAVE falls back to sequential) |
 | `--grep regex` | Filter tests by name/description |
-| `--last-failed` | Re-run failures from `.snapapi/last-run.json` (matches file + suite + name, including `Test [row]`) |
+| `--lf` / `--last-failed` | Re-run failures from `.snapapi/last-run.json` (matches file + suite + name, including `Test [row]`) |
+| `--ff` / `--failed-first` | Run last-failed tests first, then the rest |
 | `--mode record\|replay\|record-on-miss` | VCR cassettes under `.snapapi/cassettes/` |
 | `--record-on-miss` | With `--mode replay`, hit the network and save when a cassette is missing |
 | `--vcr-match query,body,accept,authorization` | Cassette identity fields (default: query, content-type, accept, body) |
 | `--contract-strict` | Fail when an OpenAPI path/method/schema is missing (default: skip/warn) |
 | `--reruns N` | Re-run failed *tests* up to N times (distinct from `EXPECT RETRY`) |
+| `--listener PATH[:Class]` | Python listener called after each test / suite (repeatable) |
 | `--on-fail curl` / `--on-fail har:dir` | Emit a redacted curl or HAR on failure |
 | `--safe-url` | Block private/metadata hosts |
 | `--proxy URL` | HTTP/HTTPS proxy |
@@ -78,11 +90,11 @@ Options:
 | `--cert PATH` | Client certificate |
 | `--cacert PATH` | CA bundle used to verify TLS |
 | `snapapi lint PATH` | Parse/validate without HTTP |
-| `snapapi fmt PATH` | Format `.snaptest` files |
+| `snapapi fmt PATH` | Format `.sapi` files |
 | `snapapi openapi spec.yaml` | Generate GET/POST/PUT/PATCH/DELETE smoke tests |
 | `snapapi history [--failed] [--since 7d]` | Print `.snapapi/history.jsonl` |
 | `snapapi mock mock.json [--port 0]` | Serve routes from a JSON mock file (prints the URL) |
-| `snapapi watch PATH [--interval 0.5]` | Re-run when `.snaptest` files change (poll; optional `watchdog` extra) |
+| `snapapi watch PATH [--interval 0.5]` | Re-run when `.sapi` files change (poll; optional `watchdog` extra) |
 
 The process exits `0` when every test passed, `1` when a test failed, and `2` on parse or usage errors.
 
@@ -94,7 +106,6 @@ Recommended form:
 SUITE: Book Store
 DESC: Validates the user API
 TIMEOUT: 10
-STOP-ON-FAILURE: false
 URL: https://api.example.com
 HEADER Content-Type: application/json
 
@@ -133,7 +144,7 @@ Comments are `//` lines. Indentation is cosmetic. JSON bodies may be one line or
 The older forms still parse:
 
 ```
-OPTIONS: {"STOP-ON-FAILURE": false, "TIMEOUT": 10}
+OPTIONS: {"TIMEOUT": 10}
 HEADERS: {"Content-Type": "application/json"}
 TAG: users, write
 REQUEST: POST /users
@@ -147,15 +158,18 @@ EXPECT: HEADER Content-Type CONTAINS json
 
 ### Keywords
 
-- Suite: `SUITE`, `DESC`, `URL`, `TIMEOUT`, `STOP-ON-FAILURE`, `FOLLOW-REDIRECTS`, `OPTIONS`, `IMPORT`, `SUITE SETUP`, `SET`
-- Test: `TEST`, `TAG`, `SETUP`, `TEARDOWN`, `SKIP`, `ONLY`, `QUARANTINE`, `EXAMPLES`, `SET`
+- Suite: `SUITE`, `DESC`, `URL`, `TIMEOUT`, `FOLLOW-REDIRECTS`, `OPTIONS`, `IMPORT`, `SUITE-SETUP`, `SET`
+- Test: `TEST`, `TAG`, `SETUP`, `TEARDOWN`, `DEPENDS`, `SKIP`, `ONLY`, `QUARANTINE`, `EXAMPLES`, `SET`
+- Helper: `HELPER` (named procedure for `SUITE-SETUP` / `SETUP` / `TEARDOWN`; not a test case)
 - Request: `REQUEST`, `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`, `BODY`/`DATA`, `FILE`, `GRAPHQL`, `HEADER`/`HEADERS`, `QUERY`, `PARAM`, `AUTH`, `EXPECT`, `SAVE`, `WAIT`, `SET`
 
 HTTP `OPTIONS` is written as `REQUEST: OPTIONS /path` so it does not collide with suite-level `OPTIONS: {...}` JSON. `HEAD: /x` is a request alias like `GET:`.
 
-`SETUP` / `TEARDOWN` name another `TEST`. Those helper tests are not run as standalone cases.
+`SETUP` / `TEARDOWN` name a `HELPER` or `TEST`. Prefer `HELPER:` for procedures that should not appear as cases. A `TEST` named only as setup is still treated as a helper (legacy).
 
-`IMPORT: other.snaptest` pulls tests from another file (paths are relative to the current file).
+`DEPENDS: Create User` (comma-separated for several names) keeps both tests as primaries. SnapAPI reorders so named tests run first; unrelated tests keep file order. If a named test failed, skipped, or was not selected (for example `-k`), the dependent test is skipped with that reason. Cycles and unknown names are parse errors. `DEPENDS` cannot target a `HELPER`. This is not `SETUP:` — setup helpers always run first and fail the dependent test when they fail.
+
+`IMPORT: other.sapi` pulls tests from another file (paths are relative to the current file).
 
 `SET: orderId ${uuid()}` assigns an interpolated value (including helpers) without an HTTP call. It may appear at suite, test, or step level.
 
@@ -196,6 +210,9 @@ EXPECT: json $.items[*].id contains 3
 EXPECT: json $.items[?(@.status=="open")].id contains 3
 EXPECT: json $.tags contains-all ["a","b"]
 EXPECT: json $.items each $.status == "active"
+EXPECT: status == 400 OR status == 401
+EXPECT: json $.success == false AND body contains error
+EXPECT: (status == 400 OR status == 401) AND json $.success == false
 EXPECT: schema ./schemas/user.json
 EXPECT: duration < 200ms
 EXPECT: header Content-Type contains json
@@ -214,6 +231,8 @@ EXPECT: HEADER Content-Type CONTAINS json
 ```
 
 JSONPath is a small subset: `$.a.b`, `$.items.0.id`, `$.items[0].id`, `$.items[*].id`, and equality filters `$.items[?(@.status=="open")]` / `$.items[?(@.id==1)]`.
+
+`AND` / `OR` combine checks on one line (`AND` binds tighter than `OR`; parentheses group). Quote a value if it contains those words. Multiple `EXPECT` lines on the same request still all have to pass.
 
 XPath uses stdlib `xml.etree` (descendant tags and `/@attr`). Axes, namespaces, and functions are not implemented.
 
@@ -237,10 +256,10 @@ Install with `pip install -e ".[dev]"`. Then:
 
 ```python
 def test_suite(snapapi_run):
-    result = snapapi_run("tests/foo.snaptest")
+    result = snapapi_run("tests/foo.sapi")
     assert result.ok
 
-@pytest.mark.snapapi("tests/foo.snaptest")
+@pytest.mark.snapapi("tests/foo.sapi")
 def test_marked(snapapi_run, request):
     snapapi_run(request.node.get_closest_marker("snapapi").args[0])
 ```
@@ -252,11 +271,12 @@ def test_marked(snapapi_run, request):
 ```
 snapapi/
 ├── snapapi/              # Python package
-│   ├── parser.py         # .snaptest DSL parser
+│   ├── parser.py         # .sapi DSL parser
 │   ├── engine.py         # runner, checks, setup/teardown
 │   ├── api_client.py     # requests wrapper
 │   └── cli.py            # snapapi command
-├── tests/                # pytest + sample .snaptest
+├── tests/                # pytest + sample .sapi / .snaptest suites
+├── docs/                 # User guide + in-browser playground
 ├── snapapi-language/     # VS Code grammar / run command
 ├── pyproject.toml
 └── README.md
@@ -270,7 +290,7 @@ pytest
 
 ## VS Code
 
-The `snapapi-language` extension is a language pack for `.snaptest` files: syntax highlighting, snippets, completions, lightweight diagnostics (unknown keywords, unknown SETUP names, `HEAD:` / `REQUEST: OPTIONS`), and **SnapAPI: Run current file** / **Run test at cursor**. See [snapapi-language/README.md](snapapi-language/README.md). There is no separate language-server process.
+The `snapapi-language` extension is a language pack for `.sapi` files: syntax highlighting, snippets, completions, lightweight diagnostics (unknown keywords, unknown SETUP names, `HEAD:` / `REQUEST: OPTIONS`), and **SnapAPI: Run current file** / **Run test at cursor**. See [snapapi-language/README.md](snapapi-language/README.md). There is no separate language-server process.
 
 ## License
 

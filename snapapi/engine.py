@@ -1362,7 +1362,35 @@ class Engine:
                 selected,
                 key=lambda test: 0 if self._matches_failed_list(self.prefer_failed or self.last_failed, test) else 1,
             )
-        return selected
+        return self._order_by_depends(selected)
+
+    def _order_by_depends(self, tests):
+        if not any(test.get("depends") for test in tests):
+            return tests
+        by_name = {test["name"]: test for test in tests}
+        index = {test["name"]: i for i, test in enumerate(tests)}
+        seen = set()
+        visiting = set()
+        ordered = []
+
+        def visit(name):
+            if name in seen or name not in by_name:
+                return
+            if name in visiting:
+                return
+            visiting.add(name)
+            test = by_name[name]
+            deps = [dep for dep in (test.get("depends") or []) if dep in by_name]
+            deps.sort(key=lambda dep: index[dep])
+            for dep in deps:
+                visit(dep)
+            visiting.remove(name)
+            seen.add(name)
+            ordered.append(test)
+
+        for test in tests:
+            visit(test["name"])
+        return ordered
 
     def matching_tests(self):
         tests = []

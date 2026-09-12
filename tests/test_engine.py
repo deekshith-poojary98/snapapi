@@ -273,6 +273,62 @@ DEPENDS: Create User
     assert http_server.requests == []
 
 
+def test_depends_reorders_later_dependency(http_server):
+    http_server.on("GET", "/one", json={"ok": True})
+    http_server.on("GET", "/two", json={"ok": True})
+    http_server.on("GET", "/three", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+TEST: tc1
+  GET: /one
+  EXPECT: status == 200
+TEST: tc2
+DEPENDS: tc3
+  GET: /two
+  EXPECT: status == 200
+TEST: tc3
+  GET: /three
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert result.ok
+    assert [test.name for test in result.tests] == ["tc1", "tc3", "tc2"]
+    assert [item["path"] for item in http_server.requests] == ["/one", "/three", "/two"]
+
+
+def test_depends_keeps_unrelated_file_order(http_server):
+    http_server.on("GET", "/one", json={"ok": True})
+    http_server.on("GET", "/two", json={"ok": True})
+    http_server.on("GET", "/three", json={"ok": True})
+    http_server.on("GET", "/four", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+TEST: tc1
+  GET: /one
+  EXPECT: status == 200
+TEST: tc2
+DEPENDS: tc4
+  GET: /two
+  EXPECT: status == 200
+TEST: tc3
+  GET: /three
+  EXPECT: status == 200
+TEST: tc4
+  GET: /four
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert result.ok
+    assert [test.name for test in result.tests] == ["tc1", "tc4", "tc2", "tc3"]
+    assert [item["path"] for item in http_server.requests] == ["/one", "/four", "/two", "/three"]
+
+
 def test_depends_skips_when_upstream_not_run(http_server):
     http_server.on("GET", "/create", json={"ok": True})
     http_server.on("GET", "/get", json={"ok": True})
