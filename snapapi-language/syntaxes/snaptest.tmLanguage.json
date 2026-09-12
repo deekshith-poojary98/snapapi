@@ -1,64 +1,348 @@
 {
     "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
     "name": "SnapTest",
+    "scopeName": "source.snaptest",
+    "uuid": "c735ff89-1fc6-4701-9e29-6de20702a66d",
     "patterns": [
         {
             "include": "#comments"
         },
         {
-            "include": "#keywords"
+            "include": "#jsonBlocks"
         },
         {
-            "include": "#httpMethods"
+            "include": "#expectLine"
         },
         {
-            "include": "#assertionKeywords"
+            "include": "#saveLine"
         },
         {
-            "include": "#variables"
+            "include": "#authLine"
         },
         {
-            "include": "#strings"
+            "include": "#requestLine"
         },
         {
-            "include": "#numbers"
+            "include": "#httpMethodLines"
         },
         {
-            "include": "#urls"
+            "include": "#headerLine"
+        },
+        {
+            "include": "#namedLines"
+        },
+        {
+            "include": "#keywordLines"
+        },
+        {
+            "include": "#values"
         }
     ],
     "repository": {
-        "keywords": {
+        "comments": {
+            "name": "comment.line.double-slash.snaptest",
+            "match": "^\\s*//.*$"
+        },
+        "jsonBlocks": {
+            "begin": "^(\\s*)(BODY|DATA|HEADERS|OPTIONS)(:)\\s*",
+            "end": "(?=^\\s*(?:[A-Z][A-Z0-9_-]*:|HEADER\\s+\\S+\\s*:|//))",
+            "beginCaptures": {
+                "2": {
+                    "name": "keyword.control.snaptest"
+                },
+                "3": {
+                    "name": "punctuation.separator.key-value.snaptest"
+                }
+            },
+            "contentName": "meta.embedded.block.json.snaptest",
             "patterns": [
                 {
-                    "name": "keyword.control.snaptest",
-                    "match": "\\b(SUITE|DESC|URL|TEST|DATA|HEADERS|SETUP|TEARDOWN|TAG|REQUEST|EXPECT|OPTIONS|SAVE|IMPORT|FROM)\\b"
+                    "include": "#values"
+                },
+                {
+                    "include": "source.json"
                 }
             ]
         },
-        "httpMethods": {
-            "patterns": [
-                {
-                    "name": "keyword.other.httpmethod.snaptest",
-                    "match": "\\b(GET|POST|DELETE|PUT|PATCH)\\b"
+        "expectLine": {
+            "begin": "^(\\s*)(EXPECT)(:)",
+            "end": "$",
+            "beginCaptures": {
+                "2": {
+                    "name": "keyword.control.snaptest"
+                },
+                "3": {
+                    "name": "punctuation.separator.key-value.snaptest"
                 }
-            ]
-        },
-        "assertionKeywords": {
+            },
             "patterns": [
                 {
                     "name": "keyword.other.assertion.snaptest",
-                    "match": "\\b(STATUS|CONTAINS|JSON|HEADER|RETRY)\\b"
+                    "match": "(?i)\\b(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|RETRY|INLINE)\\b"
+                },
+                {
+                    "include": "#operators"
+                },
+                {
+                    "include": "#values"
+                }
+            ]
+        },
+        "saveLine": {
+            "begin": "^(\\s*)(SAVE)(:)",
+            "end": "$",
+            "beginCaptures": {
+                "2": {
+                    "name": "keyword.control.snaptest"
+                },
+                "3": {
+                    "name": "punctuation.separator.key-value.snaptest"
+                }
+            },
+            "patterns": [
+                {
+                    "name": "keyword.operator.word.snaptest",
+                    "match": "(?i)\\bFROM\\b"
+                },
+                {
+                    "include": "#values"
+                }
+            ]
+        },
+        "authLine": {
+            "begin": "^(\\s*)(AUTH)(:)",
+            "end": "$",
+            "beginCaptures": {
+                "2": {
+                    "name": "keyword.control.snaptest"
+                },
+                "3": {
+                    "name": "punctuation.separator.key-value.snaptest"
+                }
+            },
+            "patterns": [
+                {
+                    "name": "constant.language.auth-scheme.snaptest",
+                    "match": "(?i)\\b(bearer|basic|digest|token|oauth2)\\b"
+                },
+                {
+                    "include": "#values"
+                }
+            ]
+        },
+        "requestLine": {
+            "begin": "^(\\s*)(REQUEST)(:)",
+            "end": "$",
+            "beginCaptures": {
+                "2": {
+                    "name": "keyword.control.snaptest"
+                },
+                "3": {
+                    "name": "punctuation.separator.key-value.snaptest"
+                }
+            },
+            "patterns": [
+                {
+                    "name": "keyword.other.httpmethod.snaptest",
+                    "match": "(?i)\\b(GET|POST|PUT|PATCH|DELETE)\\b"
+                },
+                {
+                    "include": "#values"
+                }
+            ]
+        },
+        "httpMethodLines": {
+            "begin": "^(\\s*)(GET|POST|PUT|PATCH|DELETE)(:)",
+            "end": "$",
+            "beginCaptures": {
+                "2": {
+                    "name": "keyword.other.httpmethod.snaptest"
+                },
+                "3": {
+                    "name": "punctuation.separator.key-value.snaptest"
+                }
+            },
+            "patterns": [
+                {
+                    "include": "#values"
+                }
+            ]
+        },
+        "headerLine": {
+            "match": "^(\\s*)(HEADER)\\s+([^:]+?)\\s*(:)(.*)$",
+            "captures": {
+                "2": {
+                    "name": "keyword.control.snaptest"
+                },
+                "3": {
+                    "name": "entity.other.attribute-name.snaptest"
+                },
+                "4": {
+                    "name": "punctuation.separator.key-value.snaptest"
+                },
+                "5": {
+                    "patterns": [
+                        {
+                            "include": "#values"
+                        }
+                    ]
+                }
+            }
+        },
+        "namedLines": {
+            "patterns": [
+                {
+                    "match": "^(\\s*)(SUITE)(:)\\s*(.*)$",
+                    "captures": {
+                        "2": {
+                            "name": "keyword.control.snaptest"
+                        },
+                        "3": {
+                            "name": "punctuation.separator.key-value.snaptest"
+                        },
+                        "4": {
+                            "name": "entity.name.section.snaptest"
+                        }
+                    }
+                },
+                {
+                    "match": "^(\\s*)(TEST)(:)\\s*(.*)$",
+                    "captures": {
+                        "2": {
+                            "name": "keyword.control.snaptest"
+                        },
+                        "3": {
+                            "name": "punctuation.separator.key-value.snaptest"
+                        },
+                        "4": {
+                            "name": "entity.name.function.snaptest"
+                        }
+                    }
+                },
+                {
+                    "match": "^(\\s*)(SETUP|TEARDOWN)(:)\\s*(.*)$",
+                    "captures": {
+                        "2": {
+                            "name": "keyword.control.snaptest"
+                        },
+                        "3": {
+                            "name": "punctuation.separator.key-value.snaptest"
+                        },
+                        "4": {
+                            "name": "entity.name.function.snaptest"
+                        }
+                    }
+                },
+                {
+                    "match": "^(\\s*)(IMPORT)(:)\\s*(.*)$",
+                    "captures": {
+                        "2": {
+                            "name": "keyword.control.snaptest"
+                        },
+                        "3": {
+                            "name": "punctuation.separator.key-value.snaptest"
+                        },
+                        "4": {
+                            "name": "string.unquoted.path.snaptest",
+                            "patterns": [
+                                {
+                                    "include": "#values"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "keywordLines": {
+            "patterns": [
+                {
+                    "begin": "^(\\s*)(STOP-ON-FAILURE)(:)",
+                    "end": "$",
+                    "beginCaptures": {
+                        "2": {
+                            "name": "keyword.control.snaptest"
+                        },
+                        "3": {
+                            "name": "punctuation.separator.key-value.snaptest"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "name": "constant.language.boolean.snaptest",
+                            "match": "(?i)\\b(true|false|yes|no|on|off)\\b"
+                        },
+                        {
+                            "include": "#values"
+                        }
+                    ]
+                },
+                {
+                    "begin": "^(\\s*)(HEADER)(:)",
+                    "end": "$",
+                    "beginCaptures": {
+                        "2": {
+                            "name": "keyword.control.snaptest"
+                        },
+                        "3": {
+                            "name": "punctuation.separator.key-value.snaptest"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#values"
+                        }
+                    ]
+                },
+                {
+                    "begin": "^(\\s*)(DESC|URL|TIMEOUT|TAG|QUERY|PARAM|FILE|GRAPHQL|EXAMPLES|SKIP|ONLY|QUARANTINE|FOLLOW-REDIRECTS|SUITE-SETUP|SUITE-TEARDOWN)(:)",
+                    "end": "$",
+                    "beginCaptures": {
+                        "2": {
+                            "name": "keyword.control.snaptest"
+                        },
+                        "3": {
+                            "name": "punctuation.separator.key-value.snaptest"
+                        }
+                    },
+                    "patterns": [
+                        {
+                            "include": "#values"
+                        }
+                    ]
+                }
+            ]
+        },
+        "operators": {
+            "name": "keyword.operator.comparison.snaptest",
+            "match": "==|!="
+        },
+        "values": {
+            "patterns": [
+                {
+                    "include": "#variables"
+                },
+                {
+                    "include": "#strings"
+                },
+                {
+                    "include": "#urls"
+                },
+                {
+                    "include": "#jsonPath"
+                },
+                {
+                    "include": "#numbers"
                 }
             ]
         },
         "variables": {
-            "patterns": [
-                {
-                    "name": "variable.other.interpolated.snaptest",
-                    "match": "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}"
-                }
-            ]
+            "name": "variable.other.interpolated.snaptest",
+            "match": "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}"
+        },
+        "jsonPath": {
+            "name": "variable.other.jsonpath.snaptest",
+            "match": "\\$\\.[A-Za-z0-9_\\[\\]\\.]+"
         },
         "strings": {
             "name": "string.quoted.double.snaptest",
@@ -70,25 +354,17 @@
                     "match": "\\\\."
                 },
                 {
-                    "name": "variable.other.interpolated.snaptest",
-                    "match": "\\$\\{[A-Za-z_][A-Za-z0-9_]*\\}"
+                    "include": "#variables"
                 }
             ]
         },
-        "comments": {
-            "name": "comment.line.double-slash.snaptest",
-            "begin": "//",
-            "end": "$"
-        },
         "numbers": {
             "name": "constant.numeric.snaptest",
-            "match": "\\b\\d+\\b"
+            "match": "\\b\\d+(?:\\.\\d+)?\\b"
         },
         "urls": {
-            "name": "support.constant.url.snaptest",
-            "match": "(https?|ftp|file)://[-A-Za-z0-9+&@#/%?=~_|!:,.;]*[-A-Za-z0-9+&@#/%=~_|]"
+            "name": "markup.underline.link.snaptest",
+            "match": "https?://[^\\s\"']+"
         }
-    },
-    "scopeName": "source.snaptest",
-    "uuid": "c735ff89-1fc6-4701-9e29-6de20702a66d"
+    }
 }

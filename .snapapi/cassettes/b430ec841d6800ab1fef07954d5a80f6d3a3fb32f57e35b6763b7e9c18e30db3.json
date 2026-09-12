@@ -1,0 +1,14 @@
+{
+  "method": "GET",
+  "url": "http://127.0.0.1:57172/graphql",
+  "status_code": 200,
+  "headers": {
+    "Server": "BaseHTTP/0.6 Python/3.13.9",
+    "Date": "Sat, 12 Sep 2026 15:20:16 GMT",
+    "Content-Type": "application/json",
+    "Content-Length": "12",
+    "Connection": "close"
+  },
+  "body": "{\"ok\": true}",
+  "key": "b430ec841d6800ab1fef07954d5a80f6d3a3fb32f57e35b6763b7e9c18e30db3"
+}

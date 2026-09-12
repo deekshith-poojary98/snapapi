@@ -43,6 +43,36 @@ def test_cli_parse_error_exit_two(tmp_path):
     assert main([str(suite)]) == 2
 
 
+def test_cli_name_filter(http_server, tmp_path):
+    http_server.on("GET", "/users", json={"ok": True})
+    http_server.on("GET", "/health", json={"ok": True})
+    suite = tmp_path / "names.snaptest"
+    _write_suite(suite, http_server, """
+TEST: Users
+  REQUEST: GET /users
+  EXPECT: STATUS 200
+TEST: Health
+  REQUEST: GET /health
+  EXPECT: STATUS 200
+""")
+    assert main([str(suite), "--name", "Users"]) == 0
+    assert [item["path"] for item in http_server.requests] == ["/users"]
+
+
+def test_cli_name_filter_unknown(tmp_path):
+    suite = tmp_path / "names.snaptest"
+    suite.write_text(
+        """
+SUITE: CLI
+TEST: Users
+  REQUEST: GET /users
+  EXPECT: STATUS 200
+""",
+        encoding="utf-8",
+    )
+    assert main([str(suite), "--name", "Missing"]) == 2
+
+
 def test_cli_tag_filter(http_server, tmp_path):
     http_server.on("GET", "/users", json={"ok": True})
     http_server.on("GET", "/health", json={"ok": True})
@@ -169,3 +199,28 @@ TEST: Second
 def test_parse_dsl_helper_still_works():
     suite = parse_dsl("SUITE: X\nTEST: T\n  REQUEST: GET /z\n  EXPECT: STATUS 200\n")
     assert suite["name"] == "X"
+
+
+def test_cli_new_syntax(http_server, tmp_path):
+    http_server.on("GET", "/secure", json={"ok": True})
+    env = tmp_path / "test.env"
+    env.write_text("TOKEN=abc123\n", encoding="utf-8")
+    suite = tmp_path / "new.snaptest"
+    _write_suite(
+        suite,
+        http_server,
+        """
+TIMEOUT: 5
+STOP-ON-FAILURE: false
+TEST: Auth
+TAG: smoke
+  GET: /secure
+  AUTH: bearer ${TOKEN}
+  QUERY: page=1
+  EXPECT: status == 200
+  EXPECT: body contains ok
+""",
+    )
+    assert main([str(suite), "--env", str(env)]) == 0
+    assert http_server.requests[0]["headers"].get("Authorization") == "Bearer abc123"
+    assert "page=1" in http_server.requests[0]["query"]

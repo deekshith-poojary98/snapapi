@@ -1,0 +1,41 @@
+// Recommended DSL. Pytest runs this against a local mock server with BASE_URL and TOKEN.
+
+SUITE: Recommended syntax
+DESC: End-to-end suite using the current SnapAPI DSL
+TIMEOUT: 5
+STOP-ON-FAILURE: false
+URL: ${BASE_URL}
+HEADER Content-Type: application/json
+
+TEST: Create User
+DESC: Create a user and keep the id
+TAG: users write
+  POST: /users
+  AUTH: bearer ${TOKEN}
+  BODY: {
+    "name": "Jane",
+    "email": "jane@example.com"
+  }
+  EXPECT: status == 201
+  EXPECT: body contains id
+  SAVE: userId FROM $.id
+
+TEST: Get User
+TAG: users
+SETUP: Create User
+  GET: /users/${userId}
+  EXPECT: status == 200
+  EXPECT: json $.email == "jane@example.com"
+  EXPECT: header Content-Type contains json
+
+TEST: List Users
+TAG: users
+  GET: /users
+  QUERY: page=2&limit=10
+  PARAM: sort name
+  EXPECT: status == 200
+  EXPECT: body contains data
+
+TEST: Wait for ready
+  GET: /health
+  EXPECT: status == 200 RETRY 5

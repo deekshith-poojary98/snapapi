@@ -6,8 +6,13 @@ from pathlib import Path
 
 from snapapi.engine import Engine
 from snapapi.exceptions import ParseError, SnapAPIError
+from snapapi.fmt import format_file
+from snapapi.history import append_history, read_last_failed, write_last_run
+from snapapi.lint import format_issues, lint_files
+from snapapi.openapi import generate_smoke
 from snapapi.parser import TestParser
-from snapapi.reports import build_report_payload, write_json_report, write_junit_report
+from snapapi.profiles import load_profile
+from snapapi.reports import build_report_payload, write_html_report, write_json_report, write_junit_report
 from snapapi.variables import base_variables
 
 
@@ -16,43 +21,52 @@ def build_parser():
         prog="snapapi",
         description="SnapAPI — lightweight DSL for HTTP API testing",
     )
-    parser.add_argument(
-        "paths",
-        nargs="+",
-        help="One or more .snaptest files or directories",
-    )
-    parser.add_argument(
-        "--tag",
-        action="append",
-        dest="tags",
-        metavar="TAG",
-        default=None,
-        help="Only run tests that have this tag (repeatable; all tags must match)",
-    )
-    parser.add_argument(
-        "--env",
-        dest="env_file",
-        help="KEY=VALUE env file used for ${VAR} interpolation",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=None,
-        help="HTTP timeout in seconds (overrides OPTIONS TIMEOUT)",
-    )
-    parser.add_argument(
-        "--report",
-        action="append",
-        default=[],
-        metavar="KIND:PATH",
-        help="Write a report: json:path or junit:path (repeatable)",
-    )
-    parser.add_argument(
-        "--stop-on-failure",
-        action="store_true",
-        help='Stop each suite on first failure (overrides OPTIONS)',
-    )
+    sub = parser.add_subparsers(dest="command")
+
+    run = sub.add_parser("run", help="Run .snaptest suites (default)")
+    _add_run_args(run)
+
+    lint = sub.add_parser("lint", help="Parse and validate suites without HTTP")
+    lint.add_argument("paths", nargs="+", help="Files or directories")
+    lint.add_argument("--env", dest="env_file")
+    lint.add_argument("--profile")
+    lint.add_argument("--strict", action="store_true", help="Treat unused SAVE as errors")
+
+    fmt = sub.add_parser("fmt", help="Format .snaptest files")
+    fmt.add_argument("paths", nargs="+")
+    fmt.add_argument("--check", action="store_true")
+
+    openapi = sub.add_parser("openapi", help="Generate GET smoke tests from an OpenAPI spec")
+    openapi.add_argument("spec")
+    openapi.add_argument("--base-url")
+    openapi.add_argument("-o", "--output")
+
+    # Default positional paths so `snapapi file.snaptest` still works.
+    parser.add_argument("paths", nargs="*", help=argparse.SUPPRESS)
+    _add_run_args(parser, optional=True)
     return parser
+
+
+def _add_run_args(parser, optional=False):
+    if not optional:
+        parser.add_argument("paths", nargs="+", help="One or more .snaptest files or directories")
+    parser.add_argument("--tag", action="append", dest="tags", metavar="TAG", default=None)
+    parser.add_argument("--name", action="append", dest="names", metavar="TEST", default=None)
+    parser.add_argument("--grep", help="Regex filter on test name/description")
+    parser.add_argument("--env", dest="env_file", help="KEY=VALUE env file used for ${VAR} interpolation")
+    parser.add_argument("--profile", help="Load environments/<name>.env, .snapapi/<name>.env, or <name>.env")
+    parser.add_argument("--timeout", type=float, default=None)
+    parser.add_argument("--report", action="append", default=[], metavar="KIND:PATH")
+    parser.add_argument("--stop-on-failure", action="store_true")
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--include-skipped", action="store_true")
+    parser.add_argument("--include-quarantine", action="store_true")
+    parser.add_argument("--last-failed", action="store_true")
+    parser.add_argument("--mode", choices=["live", "record", "replay"])
+    parser.add_argument("--on-fail", action="append", default=[], metavar="curl|har:DIR")
+    parser.add_argument("--no-dump", action="store_true", help="Do not print request/response on failure")
+    parser.add_argument("--safe-url", action="store_true", help="Block private/metadata URLs")
+    parser.add_argument("--allow-private-urls", action="store_true")
 
 
 def collect_files(paths):
@@ -82,19 +96,37 @@ def parse_report_specs(specs):
     reports = []
     for spec in specs:
         if ":" not in spec:
-            raise SnapAPIError(f"Invalid --report value {spec!r} (expected json:path or junit:path)")
+            raise SnapAPIError(f"Invalid --report value {spec!r} (expected json:path, junit:path, or html:path)")
         kind, _, path = spec.partition(":")
         kind = kind.strip().lower()
         path = path.strip()
-        if kind not in ("json", "junit") or not path:
-            raise SnapAPIError(f"Invalid --report value {spec!r} (expected json:path or junit:path)")
+        if kind not in ("json", "junit", "html") or not path:
+            raise SnapAPIError(f"Invalid --report value {spec!r} (expected json:path, junit:path, or html:path)")
         reports.append((kind, path))
     return reports
 
 
-def run_suites(files, *, tags=None, env_file=None, timeout=None, stop_on_failure=None, retry_backoff=None):
+def run_suites(
+    files,
+    *,
+    tags=None,
+    names=None,
+    env_file=None,
+    extra_vars=None,
+    timeout=None,
+    stop_on_failure=None,
+    retry_backoff=None,
+    grep=None,
+    include_skipped=False,
+    include_quarantine=False,
+    workers=1,
+    dump_on_fail=True,
+    on_fail=None,
+    mode=None,
+    safe_url=False,
+):
     parser = TestParser()
-    variables = base_variables(env_file=env_file)
+    variables = base_variables(env_file=env_file, extra=extra_vars)
     results = []
     for file_path in files:
         suite = parser.parse(file_path)
@@ -103,37 +135,136 @@ def run_suites(files, *, tags=None, env_file=None, timeout=None, stop_on_failure
             variables=dict(variables),
             timeout=timeout,
             tags=tags,
+            names=names,
             stop_on_failure=True if stop_on_failure else None,
             retry_backoff=retry_backoff,
+            grep=grep,
+            include_skipped=include_skipped,
+            include_quarantine=include_quarantine,
+            workers=workers,
+            dump_on_fail=dump_on_fail,
+            on_fail=on_fail,
+            mode=mode,
+            safe_url=safe_url,
         )
         results.append(engine.run())
     return results
 
 
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] in ("lint", "fmt", "openapi", "run"):
+        command = argv[0]
+        rest = argv[1:]
+    else:
+        command = "run"
+        rest = argv
+
     try:
-        files = collect_files(args.paths)
-        report_specs = parse_report_specs(args.report)
-        results = run_suites(
-            files,
-            tags=args.tags,
-            env_file=args.env_file,
-            timeout=args.timeout,
-            stop_on_failure=args.stop_on_failure or None,
-        )
-        if report_specs:
-            payload = build_report_payload(results)
-            for kind, path in report_specs:
-                if kind == "json":
-                    write_json_report(payload, path)
-                else:
-                    write_junit_report(payload, path)
-        failed = any(not result.ok for result in results)
-        return 1 if failed else 0
+        if command == "lint":
+            return _cmd_lint(rest)
+        if command == "fmt":
+            return _cmd_fmt(rest)
+        if command == "openapi":
+            return _cmd_openapi(rest)
+        return _cmd_run(rest)
     except (ParseError, SnapAPIError, OSError, ValueError) as exc:
         print(f"snapapi: {exc}", file=sys.stderr)
         return 2
+
+
+def _cmd_run(argv):
+    parser = argparse.ArgumentParser(prog="snapapi")
+    _add_run_args(parser)
+    args = parser.parse_args(argv)
+    files = collect_files(args.paths)
+    report_specs = parse_report_specs(args.report)
+    extra = {}
+    if args.profile:
+        extra.update(load_profile(args.profile))
+    names = list(args.names or [])
+    if args.last_failed:
+        names.extend(read_last_failed())
+        if not names:
+            raise SnapAPIError("No last-failed tests recorded")
+    results = run_suites(
+        files,
+        tags=args.tags,
+        names=names or None,
+        env_file=args.env_file,
+        extra_vars=extra or None,
+        timeout=args.timeout,
+        stop_on_failure=args.stop_on_failure or None,
+        grep=args.grep,
+        include_skipped=args.include_skipped,
+        include_quarantine=args.include_quarantine,
+        workers=args.workers,
+        dump_on_fail=not args.no_dump,
+        on_fail=args.on_fail,
+        mode=args.mode,
+        safe_url=args.safe_url and not args.allow_private_urls,
+    )
+    write_last_run(results)
+    append_history(results)
+    if report_specs:
+        payload = build_report_payload(results)
+        for kind, path in report_specs:
+            if kind == "json":
+                write_json_report(payload, path)
+            elif kind == "html":
+                write_html_report(payload, path)
+            else:
+                write_junit_report(payload, path)
+    failed = any(not result.ok for result in results)
+    return 1 if failed else 0
+
+
+def _cmd_lint(argv):
+    parser = argparse.ArgumentParser(prog="snapapi lint")
+    parser.add_argument("paths", nargs="+")
+    parser.add_argument("--env", dest="env_file")
+    parser.add_argument("--profile")
+    parser.add_argument("--strict", action="store_true")
+    args = parser.parse_args(argv)
+    files = collect_files(args.paths)
+    extra = {}
+    if args.profile:
+        extra.update(load_profile(args.profile))
+    variables = base_variables(env_file=args.env_file, extra=extra or None)
+    issues = lint_files(files, variables=variables, strict=args.strict)
+    text = format_issues(issues)
+    if text:
+        print(text)
+    errors = [issue for issue in issues if issue["level"] == "error"]
+    return 2 if errors else 0
+
+
+def _cmd_fmt(argv):
+    parser = argparse.ArgumentParser(prog="snapapi fmt")
+    parser.add_argument("paths", nargs="+")
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args(argv)
+    files = collect_files(args.paths)
+    changed = False
+    for path in files:
+        if format_file(path, check=args.check):
+            changed = True
+            print(("would reformat " if args.check else "reformatted ") + str(path))
+    if args.check and changed:
+        return 1
+    return 0
+
+
+def _cmd_openapi(argv):
+    parser = argparse.ArgumentParser(prog="snapapi openapi")
+    parser.add_argument("spec")
+    parser.add_argument("--base-url")
+    parser.add_argument("-o", "--output")
+    args = parser.parse_args(argv)
+    text = generate_smoke(args.spec, base_url=args.base_url, output=args.output)
+    if not args.output:
+        print(text, end="")
+    return 0
 
 
 def entry():

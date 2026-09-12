@@ -1,24 +1,57 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import requests
 
 
 class APIClient:
-    """Thin requests wrapper. Pass a body once via ``json=`` — never double-wrap."""
+    """Session-backed HTTP client with JSON, form, raw, multipart, and GraphQL bodies."""
 
-    def __init__(self, base_url=None, timeout=30):
+    def __init__(self, base_url=None, timeout=30, follow_redirects=True):
         self.base_url = (base_url or "").rstrip("/")
         self.timeout = timeout
+        self.follow_redirects = follow_redirects
+        self.session = requests.Session()
 
-    def request(self, method, endpoint, json=None, headers=None, timeout=None):
+    def request(
+        self,
+        method,
+        endpoint,
+        json=None,
+        data=None,
+        headers=None,
+        timeout=None,
+        files=None,
+        body_type=None,
+        raw=None,
+        content_type=None,
+        follow_redirects=None,
+    ):
         url = self._build_url(endpoint)
         kwargs = {
-            "headers": headers,
+            "headers": dict(headers or {}),
             "timeout": self.timeout if timeout is None else timeout,
+            "allow_redirects": self.follow_redirects if follow_redirects is None else follow_redirects,
         }
-        if json is not None:
+        kind = (body_type or "json").lower()
+        if files:
+            kwargs["files"] = files
+            if data is not None:
+                kwargs["data"] = data
+        elif kind == "form":
+            kwargs["data"] = data if data is not None else json
+        elif kind == "raw":
+            kwargs["data"] = raw if raw is not None else data
+            if content_type:
+                kwargs["headers"]["Content-Type"] = content_type
+        elif kind == "graphql":
+            kwargs["json"] = json if json is not None else data
+        elif json is not None:
             kwargs["json"] = json
-        return requests.request(method.upper(), url, **kwargs)
+        elif data is not None:
+            kwargs["json"] = data
+        return self.session.request(method.upper(), url, **kwargs)
 
     def get(self, endpoint, headers=None, timeout=None, **kwargs):
         if "json" in kwargs:
@@ -52,3 +85,16 @@ class APIClient:
         if not endpoint.startswith("/"):
             return f"{self.base_url}/{endpoint}"
         return f"{self.base_url}{endpoint}"
+
+
+def open_files(file_specs, base_dir):
+    opened = {}
+    handles = []
+    for spec in file_specs or []:
+        path = Path(spec["path"])
+        if not path.is_absolute():
+            path = Path(base_dir) / path
+        handle = path.open("rb")
+        handles.append(handle)
+        opened[spec["field"]] = (path.name, handle)
+    return opened, handles

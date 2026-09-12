@@ -1,34 +1,82 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import re
 from pathlib import Path
+from urllib.parse import parse_qsl
 
 from snapapi.exceptions import ParseError
 
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 LINE_KEYWORD_RE = re.compile(r"^([A-Z][A-Z0-9_-]*):(.*)$")
+HEADER_LINE_RE = re.compile(r"^HEADER\s+(\S+)\s*:\s*(.*)$")
+SUITE_HOOK_RE = re.compile(r"^SUITE\s+(SETUP|TEARDOWN):\s*(.*)$", re.IGNORECASE)
 KNOWN_KEYWORDS = {
     "SUITE",
     "DESC",
     "URL",
     "OPTIONS",
+    "TIMEOUT",
+    "STOP-ON-FAILURE",
+    "FOLLOW-REDIRECTS",
+    "SUITE-SETUP",
+    "SUITE-TEARDOWN",
     "TEST",
     "TAG",
     "SETUP",
     "TEARDOWN",
     "REQUEST",
     "DATA",
+    "BODY",
     "HEADERS",
+    "HEADER",
+    "QUERY",
+    "PARAM",
+    "AUTH",
     "EXPECT",
     "SAVE",
     "IMPORT",
-}
-EXPECT_RETRY_RE = re.compile(r"\sRETRY\s+(\d+)\s*$", re.IGNORECASE)
-JSON_EXPECT_RE = re.compile(r"^(\S+)\s+(==|!=|CONTAINS)\s+(.+)$", re.DOTALL)
-HEADER_EXPECT_RE = re.compile(r"^(\S+)\s+(==|!=|CONTAINS)\s+(.+)$", re.DOTALL)
-SAVE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s+FROM\s+(\S+)$", re.IGNORECASE)
+    "FILE",
+    "GRAPHQL",
+    "EXAMPLES",
+    "SKIP",
+    "ONLY",
+    "QUARANTINE",
+} | set(HTTP_METHODS)
+EXPECT_RETRY_RE = re.compile(
+    r"\sRETRY\s+(\d+)(?:\s+ON\s+(\S+))?(?:\s+BACKOFF\s+(\S+))?\s*$",
+    re.IGNORECASE,
+)
+EXPECT_KIND_RE = re.compile(
+    r"^(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION)(?:\s+|(?==)|$)(.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+JSON_LENGTH_RE = re.compile(
+    r"^(\S+)\s+length\s+(==|!=|>=|<=|>|<)\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_EXPECT_RE = re.compile(
+    r"^(\S+)\s+(==|!=|CONTAINS|MATCHES|>=|<=|>|<)\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+HEADER_EXPECT_RE = re.compile(r"^(\S+)\s+(==|!=|CONTAINS)\s+(.+)$", re.DOTALL | re.IGNORECASE)
+STATUS_VALUE_RE = re.compile(r"^(==|!=)?\s*(.+)$", re.DOTALL)
+BODY_CONTAINS_RE = re.compile(r"^(not\s+)?contains\s+(.+)$", re.IGNORECASE | re.DOTALL)
+DURATION_RE = re.compile(r"^(<=|>=|<|>|==)\s*(\d+(?:\.\d+)?)(ms|s)?$", re.IGNORECASE)
+SAVE_RE = re.compile(
+    r"^([A-Za-z_][A-Za-z0-9_]*)\s+FROM\s+(header|cookie|json)?\s*(.+)$",
+    re.IGNORECASE,
+)
+FILE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s+FROM\s+(.+)$", re.IGNORECASE)
 TAG_SPLIT_RE = re.compile(r"[,\s]+")
+AUTH_SCHEMES = {
+    "bearer": "Bearer",
+    "basic": "Basic",
+    "digest": "Digest",
+    "token": "Bearer",
+}
 
 
 class TestParser:
@@ -52,6 +100,10 @@ class TestParser:
             "base_url": None,
             "headers": {},
             "options": {},
+            "setup": None,
+            "teardown": None,
+            "follow_redirects": None,
+            "oauth2": None,
             "tests": [],
             "test_map": {},
             "source": filename,
@@ -70,15 +122,14 @@ class TestParser:
                 i += 1
                 continue
 
-            match = LINE_KEYWORD_RE.match(stripped)
-            if not match:
-                raise ParseError(
-                    "Invalid line (expected KEYWORD: value)",
-                    filename=filename,
-                    lineno=lineno,
-                )
+            hook = SUITE_HOOK_RE.match(stripped)
+            if hook:
+                self._require_no_test(current_test, f"SUITE {hook.group(1).upper()}", filename, lineno)
+                suite[hook.group(1).lower()] = hook.group(2).strip()
+                i += 1
+                continue
 
-            keyword, rest = match.group(1), match.group(2).strip()
+            keyword, rest = self._split_keyword(stripped, filename, lineno)
             if keyword not in KNOWN_KEYWORDS:
                 raise ParseError(f"Unknown keyword '{keyword}'", filename=filename, lineno=lineno)
 
@@ -100,7 +151,27 @@ class TestParser:
                 payload, i = self._read_json(rest, lines, i, filename, lineno)
                 if not isinstance(payload, dict):
                     raise ParseError("OPTIONS must be a JSON object", filename=filename, lineno=lineno)
-                suite["options"] = payload
+                suite["options"].update(payload)
+            elif keyword == "TIMEOUT":
+                self._require_no_test(current_test, keyword, filename, lineno)
+                suite["options"]["TIMEOUT"] = self._parse_timeout(rest, filename, lineno)
+            elif keyword == "STOP-ON-FAILURE":
+                self._require_no_test(current_test, keyword, filename, lineno)
+                suite["options"]["STOP-ON-FAILURE"] = self._parse_bool(rest, keyword, filename, lineno)
+            elif keyword == "FOLLOW-REDIRECTS":
+                value = self._parse_bool(rest, keyword, filename, lineno)
+                if current_step is not None:
+                    current_step["follow_redirects"] = value
+                else:
+                    self._require_no_test(current_test, keyword, filename, lineno)
+                    suite["follow_redirects"] = value
+                    suite["options"]["FOLLOW-REDIRECTS"] = value
+            elif keyword == "SUITE-SETUP":
+                self._require_no_test(current_test, keyword, filename, lineno)
+                suite["setup"] = rest
+            elif keyword == "SUITE-TEARDOWN":
+                self._require_no_test(current_test, keyword, filename, lineno)
+                suite["teardown"] = rest
             elif keyword == "IMPORT":
                 self._require_no_test(current_test, keyword, filename, lineno)
                 imported = self._import_file(rest, filename, lineno, import_stack)
@@ -121,6 +192,10 @@ class TestParser:
                     "setup": None,
                     "teardown": None,
                     "steps": [],
+                    "examples": [],
+                    "skip": None,
+                    "only": False,
+                    "quarantine": None,
                     "source": filename,
                     "lineno": lineno,
                 }
@@ -139,22 +214,63 @@ class TestParser:
                 self._require_test(current_test, keyword, filename, lineno)
                 current_step = self._parse_request(rest, filename, lineno)
                 current_test["steps"].append(current_step)
-            elif keyword == "DATA":
+            elif keyword in HTTP_METHODS:
+                self._require_test(current_test, keyword, filename, lineno)
+                if not rest:
+                    raise ParseError(f"{keyword} requires a path", filename=filename, lineno=lineno)
+                current_step = self._new_step(keyword, rest, lineno)
+                current_test["steps"].append(current_step)
+            elif keyword in ("DATA", "BODY"):
+                self._require_step(current_step, keyword, filename, lineno)
+                i = self._parse_body(current_step, rest, lines, i, filename, lineno)
+            elif keyword == "FILE":
+                self._require_step(current_step, keyword, filename, lineno)
+                current_step["files"].append(self._parse_file(rest, filename, lineno))
+            elif keyword == "GRAPHQL":
                 self._require_step(current_step, keyword, filename, lineno)
                 payload, i = self._read_json(rest, lines, i, filename, lineno)
+                current_step["body_type"] = "graphql"
                 current_step["data"] = payload
+            elif keyword == "EXAMPLES":
+                self._require_test(current_test, keyword, filename, lineno)
+                rows, i = self._parse_examples(rest, lines, i, filename, lineno)
+                current_test["examples"] = rows
+            elif keyword == "SKIP":
+                self._require_test(current_test, keyword, filename, lineno)
+                current_test["skip"] = rest or "skipped"
+            elif keyword == "ONLY":
+                self._require_test(current_test, keyword, filename, lineno)
+                current_test["only"] = True
+            elif keyword == "QUARANTINE":
+                self._require_test(current_test, keyword, filename, lineno)
+                current_test["quarantine"] = rest or "quarantine"
             elif keyword == "HEADERS":
                 payload, i = self._read_json(rest, lines, i, filename, lineno)
                 if not isinstance(payload, dict):
                     raise ParseError("HEADERS must be a JSON object", filename=filename, lineno=lineno)
-                if current_step is not None:
-                    current_step["headers"] = payload
-                elif current_test is not None:
-                    merged = dict(current_test.get("headers") or {})
-                    merged.update(payload)
-                    current_test["headers"] = merged
+                self._apply_headers(payload, suite, current_test, current_step)
+            elif keyword == "HEADER":
+                name, value = self._parse_header_line(rest, filename, lineno)
+                self._apply_headers({name: value}, suite, current_test, current_step)
+            elif keyword == "QUERY":
+                self._require_step(current_step, keyword, filename, lineno)
+                self._apply_query(current_step, self._parse_query(rest, filename, lineno))
+            elif keyword == "PARAM":
+                self._require_step(current_step, keyword, filename, lineno)
+                name, value = self._parse_param(rest, filename, lineno)
+                current_step["query"][name] = value
+            elif keyword == "AUTH":
+                headers = self._parse_auth(rest, filename, lineno)
+                if "_oauth2" in headers:
+                    oauth = headers["_oauth2"]
+                    if current_step is not None:
+                        current_step["oauth2"] = oauth
+                    elif current_test is not None:
+                        current_test["oauth2"] = oauth
+                    else:
+                        suite["oauth2"] = oauth
                 else:
-                    suite["headers"] = payload
+                    self._apply_headers(headers, suite, current_test, current_step)
             elif keyword == "EXPECT":
                 self._require_step(current_step, keyword, filename, lineno)
                 current_step["checks"].append(self._parse_expect(rest, filename, lineno))
@@ -176,6 +292,19 @@ class TestParser:
             suite["options"]["STOP-ON-FAILURE"] = True
         self._validate_suite(suite, filename)
         return suite
+
+    def _split_keyword(self, stripped, filename, lineno):
+        match = LINE_KEYWORD_RE.match(stripped)
+        if match:
+            return match.group(1), match.group(2).strip()
+        header_match = HEADER_LINE_RE.match(stripped)
+        if header_match:
+            return "HEADER", f"{header_match.group(1)}: {header_match.group(2)}"
+        raise ParseError(
+            "Invalid line (expected KEYWORD: value)",
+            filename=filename,
+            lineno=lineno,
+        )
 
     def _import_file(self, spec, filename, lineno, import_stack):
         if not spec:
@@ -211,53 +340,226 @@ class TestParser:
         method, endpoint = parts[0].upper(), parts[1]
         if method not in HTTP_METHODS:
             raise ParseError(f"Unknown HTTP method '{method}'", filename=filename, lineno=lineno)
+        return self._new_step(method, endpoint, lineno)
+
+    def _new_step(self, method, endpoint, lineno):
         return {
             "action": method,
             "endpoint": endpoint,
             "data": None,
+            "raw_body": None,
+            "content_type": None,
+            "body_type": "json",
+            "files": [],
             "headers": {},
+            "query": {},
             "checks": [],
             "saves": [],
+            "follow_redirects": None,
             "lineno": lineno,
         }
+
+    def _apply_headers(self, payload, suite, current_test, current_step):
+        headers = {str(key): value for key, value in payload.items()}
+        if current_step is not None:
+            current_step["headers"].update(headers)
+        elif current_test is not None:
+            current_test["headers"].update(headers)
+        else:
+            suite["headers"].update(headers)
+
+    def _apply_query(self, step, params):
+        step["query"].update(params)
+
+    def _parse_header_line(self, rest, filename, lineno):
+        if ":" not in rest:
+            raise ParseError(
+                "HEADER must look like: HEADER Name: value",
+                filename=filename,
+                lineno=lineno,
+            )
+        name, _, value = rest.partition(":")
+        name = name.strip()
+        if not name:
+            raise ParseError(
+                "HEADER must look like: HEADER Name: value",
+                filename=filename,
+                lineno=lineno,
+            )
+        return name, value.strip()
+
+    def _parse_query(self, rest, filename, lineno):
+        if not rest:
+            raise ParseError("QUERY requires parameters", filename=filename, lineno=lineno)
+        pairs = parse_qsl(rest, keep_blank_values=True)
+        if not pairs:
+            raise ParseError(
+                "QUERY must look like: QUERY: page=2&limit=10",
+                filename=filename,
+                lineno=lineno,
+            )
+        return dict(pairs)
+
+    def _parse_param(self, rest, filename, lineno):
+        if not rest:
+            raise ParseError("PARAM requires a name and value", filename=filename, lineno=lineno)
+        if "=" in rest:
+            name, _, value = rest.partition("=")
+            name = name.strip()
+            if name and " " not in name:
+                return name, value.strip()
+        parts = rest.split(None, 1)
+        if len(parts) != 2:
+            raise ParseError(
+                "PARAM must look like: PARAM: page 2",
+                filename=filename,
+                lineno=lineno,
+            )
+        return parts[0], parts[1]
+
+    def _parse_auth(self, rest, filename, lineno):
+        if not rest:
+            raise ParseError("AUTH requires a scheme and value", filename=filename, lineno=lineno)
+        parts = rest.split(None, 1)
+        scheme = parts[0].lower()
+        if scheme == "oauth2":
+            params = dict(parse_qsl(parts[1].replace(" ", "&") if len(parts) == 2 else "", keep_blank_values=True))
+            if len(parts) == 2 and not params:
+                for item in parts[1].split():
+                    if "=" in item:
+                        key, _, value = item.partition("=")
+                        params[key.strip()] = value.strip()
+            if not params.get("token_url") or not params.get("client_id"):
+                raise ParseError(
+                    "AUTH oauth2 requires token_url and client_id",
+                    filename=filename,
+                    lineno=lineno,
+                )
+            return {"_oauth2": params}
+        if len(parts) != 2:
+            raise ParseError(
+                "AUTH must look like: AUTH: bearer <token>",
+                filename=filename,
+                lineno=lineno,
+            )
+        scheme, value = parts[0], parts[1]
+        if scheme.lower() == "basic" and ":" in value:
+            import base64
+
+            token = base64.b64encode(value.encode("utf-8")).decode("ascii")
+            return {"Authorization": f"Basic {token}"}
+        header_scheme = AUTH_SCHEMES.get(scheme.lower(), scheme)
+        return {"Authorization": f"{header_scheme} {value}"}
+
+    def _parse_timeout(self, rest, filename, lineno):
+        if not rest:
+            raise ParseError("TIMEOUT requires a number", filename=filename, lineno=lineno)
+        try:
+            value = json.loads(rest)
+        except json.JSONDecodeError:
+            try:
+                value = float(rest)
+            except ValueError as exc:
+                raise ParseError("TIMEOUT must be a number", filename=filename, lineno=lineno) from exc
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ParseError("TIMEOUT must be a number", filename=filename, lineno=lineno)
+        return value
+
+    def _parse_bool(self, rest, keyword, filename, lineno):
+        if not rest:
+            raise ParseError(f"{keyword} requires a boolean", filename=filename, lineno=lineno)
+        lowered = rest.strip().lower()
+        if lowered in ("true", "yes", "on", "1"):
+            return True
+        if lowered in ("false", "no", "off", "0"):
+            return False
+        try:
+            value = json.loads(rest)
+        except json.JSONDecodeError as exc:
+            raise ParseError(f"{keyword} must be a boolean", filename=filename, lineno=lineno) from exc
+        if isinstance(value, bool):
+            return value
+        raise ParseError(f"{keyword} must be a boolean", filename=filename, lineno=lineno)
 
     def _parse_expect(self, rest, filename, lineno):
         if not rest:
             raise ParseError("EXPECT requires a check", filename=filename, lineno=lineno)
         retry = None
+        retry_on = None
+        retry_backoff = None
         retry_match = EXPECT_RETRY_RE.search(rest)
         if retry_match:
             retry = int(retry_match.group(1))
             if retry < 1:
                 raise ParseError("RETRY must be >= 1", filename=filename, lineno=lineno)
+            retry_on = (retry_match.group(2) or "").lower() or None
+            if retry_match.group(3):
+                retry_backoff = _parse_duration_seconds(retry_match.group(3), filename, lineno)
             rest = rest[: retry_match.start()].strip()
 
-        kind, _, remainder = rest.partition(" ")
-        kind = kind.upper()
-        remainder = remainder.strip()
-        check = {"retry": retry}
+        kind_match = EXPECT_KIND_RE.match(rest)
+        if not kind_match:
+            kind, _, _remainder = rest.partition(" ")
+            raise ParseError(f"Unknown EXPECT check '{kind.upper()}'", filename=filename, lineno=lineno)
+
+        kind = kind_match.group(1).upper()
+        remainder = kind_match.group(2).strip()
+        check = {"retry": retry, "retry_on": retry_on, "retry_backoff": retry_backoff}
         if kind == "STATUS":
             if not remainder:
                 raise ParseError("EXPECT STATUS requires a status code", filename=filename, lineno=lineno)
-            check.update({"type": "STATUS", "value": remainder})
-        elif kind == "CONTAINS":
-            if not remainder:
+            status_match = STATUS_VALUE_RE.match(remainder)
+            operator = "=="
+            value = remainder
+            if status_match:
+                operator = status_match.group(1) or "=="
+                value = status_match.group(2).strip()
+            if not value:
+                raise ParseError("EXPECT STATUS requires a status code", filename=filename, lineno=lineno)
+            check.update({"type": "STATUS", "operator": operator, "value": _strip_quotes(value)})
+        elif kind in ("CONTAINS", "BODY"):
+            negated = False
+            value = remainder
+            if kind == "BODY":
+                body_match = BODY_CONTAINS_RE.match(remainder)
+                if not body_match:
+                    raise ParseError(
+                        "EXPECT body must look like: body contains <text>",
+                        filename=filename,
+                        lineno=lineno,
+                    )
+                negated = bool(body_match.group(1))
+                value = body_match.group(2).strip()
+            elif remainder.lower().startswith("not contains"):
+                negated = True
+                value = remainder[12:].strip()
+            if not value:
                 raise ParseError("EXPECT CONTAINS requires a value", filename=filename, lineno=lineno)
-            check.update({"type": "CONTAINS", "value": _strip_quotes(remainder)})
+            check.update({"type": "CONTAINS", "value": _strip_quotes(value), "negated": negated})
         elif kind == "JSON":
-            match = JSON_EXPECT_RE.match(remainder)
-            if not match:
-                raise ParseError(
-                    'EXPECT JSON must look like: JSON $.path == "value"',
-                    filename=filename,
-                    lineno=lineno,
-                )
-            check.update({
-                "type": "JSON",
-                "path": match.group(1),
-                "operator": match.group(2).upper() if match.group(2).upper() == "CONTAINS" else match.group(2),
-                "value": _parse_expect_value(match.group(3).strip()),
-            })
+            length_match = JSON_LENGTH_RE.match(remainder)
+            if length_match:
+                check.update({
+                    "type": "JSON",
+                    "path": length_match.group(1),
+                    "operator": "length " + length_match.group(2),
+                    "value": _parse_expect_value(length_match.group(3).strip()),
+                })
+            else:
+                match = JSON_EXPECT_RE.match(remainder)
+                if not match:
+                    raise ParseError(
+                        'EXPECT JSON must look like: JSON $.path == "value"',
+                        filename=filename,
+                        lineno=lineno,
+                    )
+                operator = match.group(2)
+                check.update({
+                    "type": "JSON",
+                    "path": match.group(1),
+                    "operator": operator.upper() if operator.upper() in ("CONTAINS", "MATCHES") else operator,
+                    "value": _parse_expect_value(match.group(3).strip()),
+                })
         elif kind == "HEADER":
             match = HEADER_EXPECT_RE.match(remainder)
             if not match:
@@ -273,6 +575,26 @@ class TestParser:
                 "operator": operator.upper() if operator.upper() == "CONTAINS" else operator,
                 "value": _strip_quotes(match.group(3).strip()),
             })
+        elif kind == "SCHEMA":
+            if remainder.lower().startswith("inline"):
+                payload, _ = self._read_json(remainder[6:].strip(), [remainder[6:].strip()], 0, filename, lineno)
+                check.update({"type": "SCHEMA", "mode": "inline", "schema": payload})
+            else:
+                if not remainder:
+                    raise ParseError("EXPECT schema requires a path or inline JSON", filename=filename, lineno=lineno)
+                check.update({"type": "SCHEMA", "mode": "file", "path": remainder})
+        elif kind == "DURATION":
+            match = DURATION_RE.match(remainder.replace(" ", ""))
+            if not match:
+                raise ParseError(
+                    "EXPECT duration must look like: duration < 200ms",
+                    filename=filename,
+                    lineno=lineno,
+                )
+            unit = (match.group(3) or "ms").lower()
+            amount = float(match.group(2))
+            ms = amount if unit == "ms" else amount * 1000
+            check.update({"type": "DURATION", "operator": match.group(1), "value": ms})
         else:
             raise ParseError(f"Unknown EXPECT check '{kind}'", filename=filename, lineno=lineno)
         return check
@@ -285,7 +607,74 @@ class TestParser:
                 filename=filename,
                 lineno=lineno,
             )
-        return {"name": match.group(1), "path": match.group(2)}
+        source = (match.group(2) or "json").lower()
+        selector = match.group(3).strip()
+        if source == "json" and selector.lower().startswith("header "):
+            source = "header"
+            selector = selector[7:].strip()
+        if source == "json" and selector.lower().startswith("cookie "):
+            source = "cookie"
+            selector = selector[7:].strip()
+        if source == "json" and not selector.startswith("$") and selector.lower() in ("header", "cookie"):
+            raise ParseError("SAVE header/cookie requires a name", filename=filename, lineno=lineno)
+        return {"name": match.group(1), "source": source, "path": selector}
+
+    def _parse_file(self, rest, filename, lineno):
+        match = FILE_RE.match(rest)
+        if not match:
+            raise ParseError(
+                "FILE must look like: FILE: field FROM ./path",
+                filename=filename,
+                lineno=lineno,
+            )
+        return {"field": match.group(1), "path": match.group(2).strip()}
+
+    def _parse_body(self, step, rest, lines, index, filename, lineno):
+        lowered = rest.lstrip().lower()
+        if lowered.startswith("form"):
+            payload = rest[4:].strip()
+            if not payload:
+                raise ParseError("BODY form requires key=value pairs", filename=filename, lineno=lineno)
+            step["body_type"] = "form"
+            step["data"] = dict(parse_qsl(payload, keep_blank_values=True))
+            return index
+        if lowered.startswith("raw"):
+            remainder = rest[3:].strip()
+            parts = remainder.split(None, 1)
+            if not parts:
+                raise ParseError("BODY raw requires a content type and body", filename=filename, lineno=lineno)
+            step["body_type"] = "raw"
+            step["content_type"] = parts[0]
+            step["raw_body"] = parts[1] if len(parts) == 2 else ""
+            return index
+        payload, last = self._read_json(rest, lines, index, filename, lineno)
+        step["body_type"] = "json"
+        step["data"] = payload
+        return last
+
+    def _parse_examples(self, rest, lines, index, filename, lineno):
+        if rest and not rest.startswith("{") and "\n" not in rest and Path(rest).suffix.lower() == ".csv":
+            base = Path(filename).parent if filename != "<string>" else Path.cwd()
+            path = (base / rest).resolve()
+            if not path.is_file():
+                raise ParseError(f"EXAMPLES file not found: {rest}", filename=filename, lineno=lineno)
+            return _read_csv(path.read_text(encoding="utf-8")), index
+        buf = [rest] if rest else []
+        last = index
+        while last + 1 < len(lines):
+            nxt = lines[last + 1]
+            stripped = nxt.strip()
+            if not stripped or stripped.startswith("//"):
+                last += 1
+                continue
+            if LINE_KEYWORD_RE.match(stripped) or HEADER_LINE_RE.match(stripped) or SUITE_HOOK_RE.match(stripped):
+                break
+            buf.append(stripped)
+            last += 1
+        text = "\n".join(item for item in buf if item)
+        if not text:
+            raise ParseError("EXAMPLES requires a CSV file or inline table", filename=filename, lineno=lineno)
+        return _read_csv(text), last
 
     def _read_json(self, rest, lines, index, filename, lineno):
         buf = rest
@@ -306,6 +695,10 @@ class TestParser:
 
     def _validate_suite(self, suite, filename):
         test_map = suite["test_map"]
+        for field, label in (("setup", "SUITE SETUP"), ("teardown", "SUITE TEARDOWN")):
+            name = suite.get(field)
+            if name and name not in test_map:
+                raise ParseError(f"Unknown {label} test '{name}'", filename=filename)
         for test in suite["tests"]:
             for field in ("setup", "teardown"):
                 name = test.get(field)
@@ -374,6 +767,31 @@ def _parse_expect_value(raw):
         return json.loads(raw)
     except (json.JSONDecodeError, TypeError):
         return _strip_quotes(raw)
+
+
+def _parse_duration_seconds(raw, filename, lineno):
+    text = str(raw).strip().lower()
+    try:
+        if text.endswith("ms"):
+            return float(text[:-2]) / 1000.0
+        if text.endswith("s"):
+            return float(text[:-1])
+        return float(text)
+    except ValueError as exc:
+        raise ParseError(f"Invalid BACKOFF value {raw!r}", filename=filename, lineno=lineno) from exc
+
+
+def _read_csv(text):
+    handle = io.StringIO(text.strip())
+    reader = csv.DictReader(handle)
+    if not reader.fieldnames:
+        raise ParseError("EXAMPLES CSV is missing a header row")
+    rows = []
+    for row in reader:
+        rows.append({key.strip(): (value or "").strip() for key, value in row.items() if key})
+    if not rows:
+        raise ParseError("EXAMPLES CSV has no data rows")
+    return rows
 
 
 def _json_complete(text):

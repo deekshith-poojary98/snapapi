@@ -4,6 +4,7 @@ import os
 import re
 
 from snapapi.exceptions import ParseError, SnapAPIError
+from snapapi.helpers import expand_helpers
 
 VAR_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -45,7 +46,8 @@ def base_variables(env_file=None, extra=None):
 
 
 def interpolate(value, variables):
-    """Replace ``${VAR}`` in strings; walk dicts and lists."""
+    """Replace helpers and ``${VAR}`` in strings; walk dicts and lists."""
+    value = expand_helpers(value)
     if isinstance(value, str):
         return _interpolate_string(value, variables)
     if isinstance(value, dict):

@@ -1,0 +1,115 @@
+{
+    "Suite skeleton": {
+        "prefix": ["suite", "SUITE"],
+        "body": [
+            "SUITE: ${1:Suite name}",
+            "DESC: ${2:Description}",
+            "TIMEOUT: ${3:10}",
+            "STOP-ON-FAILURE: ${4:false}",
+            "URL: ${5:https://api.example.com}",
+            "HEADER Content-Type: application/json",
+            "",
+            "TEST: ${6:Example}",
+            "  GET: ${7:/path}",
+            "  EXPECT: status == ${8:200}",
+            ""
+        ],
+        "description": "SnapAPI suite with a GET test"
+    },
+    "TEST with GET": {
+        "prefix": ["test-get", "TEST"],
+        "body": [
+            "TEST: ${1:Get resource}",
+            "TAG: ${2:smoke}",
+            "  GET: ${3:/path}",
+            "  EXPECT: status == ${4:200}",
+            ""
+        ],
+        "description": "TEST block with GET"
+    },
+    "TEST with POST": {
+        "prefix": ["test-post", "POST"],
+        "body": [
+            "TEST: ${1:Create resource}",
+            "TAG: ${2:write}",
+            "  POST: ${3:/path}",
+            "  BODY: {",
+            "    \"${4:name}\": \"${5:value}\"",
+            "  }",
+            "  EXPECT: status == ${6:201}",
+            ""
+        ],
+        "description": "TEST block with POST and BODY"
+    },
+    "GET request": {
+        "prefix": "GET",
+        "body": "GET: ${1:/path}",
+        "description": "GET request alias"
+    },
+    "POST request": {
+        "prefix": "POST",
+        "body": [
+            "POST: ${1:/path}",
+            "BODY: {",
+            "  \"${2:name}\": \"${3:value}\"",
+            "}",
+            "EXPECT: status == ${4:201}"
+        ],
+        "description": "POST request with BODY"
+    },
+    "EXPECT status": {
+        "prefix": ["expect-status", "EXPECT"],
+        "body": "EXPECT: status == ${1:200}",
+        "description": "EXPECT status check"
+    },
+    "EXPECT body contains": {
+        "prefix": "expect-body",
+        "body": "EXPECT: body contains ${1:text}",
+        "description": "EXPECT body contains check"
+    },
+    "EXPECT json": {
+        "prefix": "expect-json",
+        "body": "EXPECT: json ${1:$.path} == ${2:\"value\"}",
+        "description": "EXPECT JSONPath check"
+    },
+    "EXPECT header": {
+        "prefix": "expect-header",
+        "body": "EXPECT: header ${1:Content-Type} contains ${2:json}",
+        "description": "EXPECT response header check"
+    },
+    "EXPECT retry": {
+        "prefix": "expect-retry",
+        "body": "EXPECT: status == ${1:200} RETRY ${2:5}",
+        "description": "EXPECT status with RETRY"
+    },
+    "SAVE": {
+        "prefix": "SAVE",
+        "body": "SAVE: ${1:name} FROM ${2:$.path}",
+        "description": "SAVE a JSONPath value"
+    },
+    "AUTH bearer": {
+        "prefix": "AUTH",
+        "body": "AUTH: bearer ${1:\\${TOKEN\\}}",
+        "description": "Bearer AUTH header"
+    },
+    "HEADER": {
+        "prefix": "HEADER",
+        "body": "HEADER ${1:Content-Type}: ${2:application/json}",
+        "description": "Single HEADER line"
+    },
+    "QUERY": {
+        "prefix": "QUERY",
+        "body": "QUERY: ${1:page=1}&${2:limit=10}",
+        "description": "Query string on the current request"
+    },
+    "PARAM": {
+        "prefix": "PARAM",
+        "body": "PARAM: ${1:name} ${2:value}",
+        "description": "Single query PARAM"
+    },
+    "IMPORT": {
+        "prefix": "IMPORT",
+        "body": "IMPORT: ${1:other.snaptest}",
+        "description": "Import tests from another file"
+    }
+}

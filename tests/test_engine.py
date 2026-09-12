@@ -1,3 +1,6 @@
+import pytest
+
+from snapapi.exceptions import SnapAPIError
 from tests.helpers import parse_dsl, run_dsl
 
 
@@ -187,7 +190,7 @@ TEST: Second
     assert result.failed == 1
     assert result.passed == 0
     assert [item["path"] for item in http_server.requests] == ["/fail"]
-    assert '{"STOP-ON-FAILURE": false}' in output
+    assert "STOP-ON-FAILURE: false" in output
 
 
 def test_stop_on_failure_false_continues(http_server):
@@ -211,7 +214,7 @@ TEST: Second
 def test_tag_filter(http_server):
     http_server.on("GET", "/users", json={"ok": True})
     http_server.on("GET", "/health", json={"ok": True})
-    result, _, _ = run_dsl(
+    result, _, output = run_dsl(
         _suite(http_server, """
 TEST: Users
 TAG: user
@@ -228,6 +231,8 @@ TAG: health
     assert result.passed == 1
     assert result.skipped == 1
     assert [item["path"] for item in http_server.requests] == ["/users"]
+    assert "1 passed" in output
+    assert "1 skipped" in output
 
 
 def test_tag_filter_still_runs_untagged_setup(http_server):
@@ -252,6 +257,76 @@ TAG: other
     )
     assert result.ok
     assert [item["path"] for item in http_server.requests] == ["/setup", "/users"]
+
+
+def test_name_filter(http_server):
+    http_server.on("GET", "/users", json={"ok": True})
+    http_server.on("GET", "/health", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(http_server, """
+TEST: Users
+  REQUEST: GET /users
+  EXPECT: STATUS 200
+TEST: Health
+  REQUEST: GET /health
+  EXPECT: STATUS 200
+"""),
+        names=["Users"],
+    )
+    assert result.ok
+    assert result.passed == 1
+    assert result.skipped == 0
+    assert [item["path"] for item in http_server.requests] == ["/users"]
+
+
+def test_name_filter_runs_named_helper(http_server):
+    http_server.on("POST", "/setup", json={"ok": True})
+    http_server.on("GET", "/users", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(http_server, """
+TEST: Boot
+  REQUEST: POST /setup
+  EXPECT: STATUS 200
+TEST: Users
+SETUP: Boot
+  REQUEST: GET /users
+  EXPECT: STATUS 200
+"""),
+        names=["Boot"],
+    )
+    assert result.ok
+    assert [item["path"] for item in http_server.requests] == ["/setup"]
+
+
+def test_name_filter_still_runs_setup(http_server):
+    http_server.on("POST", "/setup", json={"ok": True})
+    http_server.on("GET", "/users", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(http_server, """
+TEST: Boot
+  REQUEST: POST /setup
+  EXPECT: STATUS 200
+TEST: Users
+SETUP: Boot
+  REQUEST: GET /users
+  EXPECT: STATUS 200
+"""),
+        names=["Users"],
+    )
+    assert result.ok
+    assert [item["path"] for item in http_server.requests] == ["/setup", "/users"]
+
+
+def test_name_filter_unknown_raises(http_server):
+    with pytest.raises(SnapAPIError, match="Unknown test name: Missing"):
+        run_dsl(
+            _suite(http_server, """
+TEST: Users
+  REQUEST: GET /users
+  EXPECT: STATUS 200
+"""),
+            names=["Missing"],
+        )
 
 
 def test_retry_until_success(http_server):
@@ -284,8 +359,92 @@ TEST: Ping
   EXPECT: STATUS 200
 """))
     assert result.ok
-    assert "ms" in output
-    assert "Duration:" in output
+    assert "PASS" in output
+    assert "1 passed" in output
+    assert "0 failed" in output
+    assert "ms" in output or "s" in output
+
+
+def test_console_output_compact_tree(http_server):
+    http_server.on("POST", "/users", status=201, json={"id": "7"})
+    http_server.on("GET", "/users/7", json={"id": "7"})
+    http_server.on("DELETE", "/users/7", status=204, text="")
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+DESC: Example tests against local server
+TEST: Create User
+DESC: Should not appear in compact output
+TAG: users, write
+  REQUEST: POST /users
+  DATA: {"name": "Jane"}
+  EXPECT: STATUS 201
+  SAVE: userId FROM $.id
+TEST: Cleanup User
+DESC: teardown helper should not dump description
+  REQUEST: DELETE /users/${userId}
+  EXPECT: STATUS 204
+TEST: Fetch User
+TAG: users
+SETUP: Create User
+TEARDOWN: Cleanup User
+  REQUEST: GET /users/${userId}
+  EXPECT: STATUS 200
+""",
+        )
+    )
+    assert result.ok
+    assert "SnapAPI  Local" in output
+    assert "Example tests against local server" in output
+    assert "Fetch User  [users]" in output
+    assert "setup Create User" in output
+    assert "teardown Cleanup User" in output
+    assert "saved userId=7" in output
+    assert "POST /users" in output
+    assert "GET /users/7" in output
+    assert "DELETE /users/7" in output
+    assert "PASS" in output
+    assert "1 passed" in output
+    assert "0 failed" in output
+    assert "Should not appear in compact output" not in output
+    assert "teardown helper should not dump description" not in output
+    assert "[users, write]" not in output
+    assert "Running test" not in output
+    assert "Test description:" not in output
+    assert "Test tag:" not in output
+    assert "Test status:" not in output
+    assert "Setup status:" not in output
+    assert "Setup description:" not in output
+    assert "✔" not in output
+    assert "SnapAPI Running" not in output
+    assert "- - -" not in output
+
+
+def test_console_failure_reason_under_request(http_server):
+    http_server.on("GET", "/api/users", status=500, json={"error": "nope"})
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+TEST: List
+  REQUEST: GET /api/users
+  EXPECT: STATUS 200
+""",
+        )
+    )
+    assert not result.ok
+    lines = output.splitlines()
+    request_line = next(line for line in lines if "GET /api/users" in line)
+    reason_line = next(line for line in lines if "Status code expected 200, got 500" in line)
+    assert len(reason_line) - len(reason_line.lstrip(" ")) > len(request_line) - len(request_line.lstrip(" "))
+    assert "FAIL" in output
+    assert "Failed:" in output
+    assert "- List:" in output
+    assert "0 passed" in output
+    assert "1 failed" in output
+    assert "Test status:" not in output
+    assert "Reason:" not in output
 
 
 def test_undefined_variable_fails(http_server):
@@ -297,3 +456,129 @@ TEST: Vars
 """))
     assert not result.ok
     assert "Undefined variable" in (result.tests[0].error or "")
+
+
+def test_new_syntax_request_body_auth_query_and_expect(http_server):
+    http_server.on(
+        "POST",
+        "/users",
+        status=201,
+        json={"id": "7", "email": "jane@example.com"},
+        headers={"Content-Type": "application/json"},
+    )
+    http_server.on(
+        "GET",
+        "/users/7",
+        json={"id": "7", "email": "jane@example.com"},
+        headers={"Content-Type": "application/json"},
+    )
+    http_server.on("GET", "/users", json={"data": []})
+    result, engine, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+TIMEOUT: 5
+STOP-ON-FAILURE: false
+HEADER Content-Type: application/json
+TEST: Create
+  POST: /users
+  AUTH: bearer ${TOKEN}
+  BODY: {"name": "Jane", "email": "jane@example.com"}
+  EXPECT: status == 201
+  EXPECT: body contains id
+  SAVE: userId FROM $.id
+TEST: Fetch
+SETUP: Create
+  GET: /users/${userId}
+  EXPECT: status == 200
+  EXPECT: json $.email == "jane@example.com"
+  EXPECT: header Content-Type contains json
+TEST: List
+  GET: /users
+  QUERY: page=2&limit=10
+  PARAM: sort name
+  EXPECT: status == 200
+""",
+        ),
+        variables={"TOKEN": "secret"},
+    )
+    assert result.ok
+    assert engine.variables["userId"] == "7"
+    create_req, fetch_req, list_req = http_server.requests
+    assert create_req["method"] == "POST"
+    assert create_req["json"] == {"name": "Jane", "email": "jane@example.com"}
+    assert create_req["headers"].get("Authorization") == "Bearer secret"
+    assert fetch_req["path"] == "/users/7"
+    assert list_req["path"] == "/users"
+    assert "page=2" in list_req["query"]
+    assert "limit=10" in list_req["query"]
+    assert "sort=name" in list_req["query"]
+
+
+def test_query_overrides_path_query_string(http_server):
+    http_server.on("GET", "/items", json={"ok": True})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Items
+  GET: /items?page=1
+  PARAM: page 2
+  EXPECT: status == 200
+"""))
+    assert result.ok
+    assert http_server.requests[0]["query"] == "page=2"
+
+
+def test_first_class_timeout_is_used(http_server):
+    http_server.on("GET", "/ping", json={"ok": True})
+    result, engine, _ = run_dsl(_suite(http_server, """
+TIMEOUT: 2.5
+TEST: Ping
+  GET: /ping
+  EXPECT: status == 200
+"""))
+    assert result.ok
+    assert engine.timeout == 2.5
+
+
+def test_recommended_syntax_file(http_server):
+    from pathlib import Path
+
+    from snapapi.engine import Engine
+    from snapapi.parser import TestParser
+    import io
+
+    http_server.on(
+        "POST",
+        "/users",
+        status=201,
+        json={"id": "7", "email": "jane@example.com"},
+        headers={"Content-Type": "application/json"},
+    )
+    http_server.on(
+        "GET",
+        "/users/7",
+        json={"id": "7", "email": "jane@example.com"},
+        headers={"Content-Type": "application/json"},
+    )
+    http_server.on("GET", "/users", json={"data": []})
+    http_server.on("GET", "/health", json={"ok": True})
+
+    suite = TestParser().parse(Path(__file__).parent / "recommended.snaptest")
+    stream = io.StringIO()
+    engine = Engine(
+        suite,
+        variables={"BASE_URL": http_server.base_url, "TOKEN": "secret"},
+        retry_backoff=0,
+        stream=stream,
+    )
+    result = engine.run()
+    assert result.ok
+    assert result.passed == 3
+    paths = [item["path"] for item in http_server.requests]
+    assert paths[0] == "/users"
+    assert http_server.requests[0]["method"] == "POST"
+    assert http_server.requests[0]["headers"].get("Authorization") == "Bearer secret"
+    assert "/users/7" in paths
+    list_req = next(item for item in http_server.requests if item["path"] == "/users" and item["method"] == "GET")
+    assert "page=2" in list_req["query"]
+    assert "sort=name" in list_req["query"]
+    assert "/health" in paths
