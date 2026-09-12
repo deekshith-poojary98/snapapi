@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from snapapi.suites import is_suite_path
+
 
 def snapshot_mtimes(files, previous=None):
     """Return current (mtime_ns, size) stamps and files that changed since ``previous``.
 
     The first snapshot (empty ``previous``) never reports changes. Later snapshots
     treat new files and size/mtime updates as changes so ``snapapi watch`` notices
-    same-second writes and newly added ``.snaptest`` files.
+    same-second writes and newly added ``.sapi`` / ``.snaptest`` files.
     """
     previous = previous or {}
     current = {}
@@ -54,7 +56,7 @@ def try_watchdog_observer(paths, on_change):
         def on_any_event(self, event):
             src = str(getattr(event, "src_path", "") or "")
             dest = str(getattr(event, "dest_path", "") or "")
-            if src.endswith(".snaptest") or dest.endswith(".snaptest"):
+            if is_suite_path(src) or is_suite_path(dest):
                 on_change()
 
     observer = Observer()

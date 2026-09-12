@@ -13,7 +13,7 @@ from snapapi.variables import base_variables
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "snapapi(path): run a SnapAPI .snaptest suite via the snapapi_run fixture",
+        "snapapi(path): run a SnapAPI .sapi suite via the snapapi_run fixture",
     )
 
 

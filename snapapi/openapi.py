@@ -22,7 +22,6 @@ def generate_smoke(spec_path, base_url=None, output=None):
     lines = [
         f"SUITE: OpenAPI smoke ({Path(spec_path).name})",
         "DESC: Generated smoke tests from OpenAPI",
-        "STOP-ON-FAILURE: false",
         f"URL: {url}",
         "",
     ]

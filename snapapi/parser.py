@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import difflib
 import io
 import json
 import re
@@ -13,21 +14,22 @@ HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 REQUEST_METHODS = set(HTTP_METHODS)
 LINE_KEYWORD_RE = re.compile(r"^([A-Z][A-Z0-9_-]*):(.*)$")
 HEADER_LINE_RE = re.compile(r"^HEADER\s+(\S+)\s*:\s*(.*)$")
-SUITE_HOOK_RE = re.compile(r"^SUITE\s+(SETUP|TEARDOWN):\s*(.*)$", re.IGNORECASE)
+SPACED_KEYWORD_RE = re.compile(r"^([A-Z][A-Z0-9_-]*(?:\s+[A-Z][A-Z0-9_-]*)+)\s*:(.*)$")
 KNOWN_KEYWORDS = {
     "SUITE",
     "DESC",
     "URL",
     "OPTIONS",
     "TIMEOUT",
-    "STOP-ON-FAILURE",
     "FOLLOW-REDIRECTS",
     "SUITE-SETUP",
     "SUITE-TEARDOWN",
     "TEST",
+    "HELPER",
     "TAG",
     "SETUP",
     "TEARDOWN",
+    "DEPENDS",
     "REQUEST",
     "DATA",
     "BODY",
@@ -98,6 +100,174 @@ AUTH_SCHEMES = {
 }
 
 
+def compact_keyword(raw):
+    return "-".join(part for part in re.split(r"[\s_]+", raw) if part)
+
+
+def suggest_keyword(raw, known=None):
+    known = KNOWN_KEYWORDS if known is None else known
+    compacted = compact_keyword(raw)
+    if compacted in known:
+        return compacted
+    if " " not in raw and "-" not in raw:
+        return None
+    matches = difflib.get_close_matches(compacted, sorted(known), n=1, cutoff=0.7)
+    return matches[0] if matches else None
+
+
+def unknown_keyword_message(raw):
+    hint = suggest_keyword(raw)
+    if " " in raw:
+        if hint:
+            if hint == compact_keyword(raw):
+                return f"Unknown keyword '{raw}'. Keywords cannot contain spaces; use {hint}"
+            return f"Unknown keyword '{raw}'. Keywords cannot contain spaces; did you mean {hint}?"
+        return f"Unknown keyword '{raw}'. Keywords cannot contain spaces"
+    if hint:
+        return f"Unknown keyword '{raw}'. Did you mean {hint}?"
+    return f"Unknown keyword '{raw}'"
+
+
+BOOL_OP_RE = re.compile(r"\s*(AND|OR)\b", re.IGNORECASE)
+
+
+def walk_expect_checks(check):
+    if check.get("type") in ("AND", "OR"):
+        for term in check.get("terms") or []:
+            yield from walk_expect_checks(term)
+    else:
+        yield check
+
+
+def _helper_names(suite):
+    names = set()
+    if suite.get("setup"):
+        names.add(suite["setup"])
+    if suite.get("teardown"):
+        names.add(suite["teardown"])
+    for test in suite.get("tests") or []:
+        if test.get("kind") == "helper":
+            names.add(test["name"])
+        if test.get("setup"):
+            names.add(test["setup"])
+        if test.get("teardown"):
+            names.add(test["teardown"])
+    return names
+
+
+class _ExpectExprParser:
+    def __init__(self, text, filename, lineno, parse_atomic):
+        self.text = text
+        self.filename = filename
+        self.lineno = lineno
+        self.parse_atomic = parse_atomic
+        self.i = 0
+
+    def parse(self):
+        node = self._parse_or()
+        self._skip_ws()
+        if self.i < len(self.text):
+            raise ParseError(
+                f"Unexpected extra EXPECT text '{self.text[self.i:].strip()}'",
+                filename=self.filename,
+                lineno=self.lineno,
+            )
+        return node
+
+    def _parse_or(self):
+        terms = [self._parse_and()]
+        while self._consume_op("OR"):
+            terms.append(self._parse_and())
+        if len(terms) == 1:
+            return terms[0]
+        return {"type": "OR", "terms": terms}
+
+    def _parse_and(self):
+        terms = [self._parse_primary()]
+        while self._consume_op("AND"):
+            terms.append(self._parse_primary())
+        if len(terms) == 1:
+            return terms[0]
+        return {"type": "AND", "terms": terms}
+
+    def _parse_primary(self):
+        self._skip_ws()
+        if self.i >= len(self.text):
+            raise ParseError("EXPECT requires a check", filename=self.filename, lineno=self.lineno)
+        if self.text[self.i] == "(":
+            self.i += 1
+            node = self._parse_or()
+            self._skip_ws()
+            if self.i >= len(self.text) or self.text[self.i] != ")":
+                raise ParseError("Unbalanced parentheses in EXPECT", filename=self.filename, lineno=self.lineno)
+            self.i += 1
+            return node
+        end = self._atomic_end()
+        slice_ = self.text[self.i : end].strip()
+        if not slice_:
+            raise ParseError("EXPECT requires a check", filename=self.filename, lineno=self.lineno)
+        self.i = end
+        return self.parse_atomic(slice_)
+
+    def _consume_op(self, wanted):
+        match = BOOL_OP_RE.match(self.text[self.i :])
+        if not match or match.group(1).upper() != wanted:
+            return False
+        self.i += match.end()
+        return True
+
+    def _skip_ws(self):
+        while self.i < len(self.text) and self.text[self.i].isspace():
+            self.i += 1
+
+    def _atomic_end(self):
+        i = self.i
+        quote = None
+        escape = False
+        brackets = 0
+        parens = 0
+        length = len(self.text)
+        while i < length:
+            ch = self.text[i]
+            if quote:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == quote:
+                    quote = None
+                i += 1
+                continue
+            if ch in "\"'":
+                quote = ch
+                i += 1
+                continue
+            if ch == "[":
+                brackets += 1
+                i += 1
+                continue
+            if ch == "]" and brackets:
+                brackets -= 1
+                i += 1
+                continue
+            if ch == "(":
+                parens += 1
+                i += 1
+                continue
+            if ch == ")":
+                if parens:
+                    parens -= 1
+                    i += 1
+                    continue
+                return i
+            if brackets == 0 and parens == 0:
+                op = re.match(r"\s+(AND|OR)\b", self.text[i:], re.IGNORECASE)
+                if op:
+                    return i
+            i += 1
+        return i
+
+
 class TestParser:
     def parse(self, test_file, _import_stack=None):
         path = Path(test_file)
@@ -143,16 +313,9 @@ class TestParser:
                 i += 1
                 continue
 
-            hook = SUITE_HOOK_RE.match(stripped)
-            if hook:
-                self._require_no_test(current_test, f"SUITE {hook.group(1).upper()}", filename, lineno)
-                suite[hook.group(1).lower()] = hook.group(2).strip()
-                i += 1
-                continue
-
             keyword, rest = self._split_keyword(stripped, filename, lineno)
             if keyword not in KNOWN_KEYWORDS:
-                raise ParseError(f"Unknown keyword '{keyword}'", filename=filename, lineno=lineno)
+                raise ParseError(unknown_keyword_message(keyword), filename=filename, lineno=lineno)
 
             if keyword == "SUITE":
                 self._require_no_test(current_test, keyword, filename, lineno)
@@ -172,13 +335,12 @@ class TestParser:
                 payload, i = self._read_json(rest, lines, i, filename, lineno)
                 if not isinstance(payload, dict):
                     raise ParseError("OPTIONS must be a JSON object", filename=filename, lineno=lineno)
+                payload = dict(payload)
+                payload.pop("STOP-ON-FAILURE", None)
                 suite["options"].update(payload)
             elif keyword == "TIMEOUT":
                 self._require_no_test(current_test, keyword, filename, lineno)
                 suite["options"]["TIMEOUT"] = self._parse_timeout(rest, filename, lineno)
-            elif keyword == "STOP-ON-FAILURE":
-                self._require_no_test(current_test, keyword, filename, lineno)
-                suite["options"]["STOP-ON-FAILURE"] = self._parse_bool(rest, keyword, filename, lineno)
             elif keyword == "FOLLOW-REDIRECTS":
                 value = self._parse_bool(rest, keyword, filename, lineno)
                 if current_step is not None:
@@ -197,21 +359,23 @@ class TestParser:
                 self._require_no_test(current_test, keyword, filename, lineno)
                 imported = self._import_file(rest, filename, lineno, import_stack)
                 self._merge_imported(suite, tests, test_map, imported, filename, lineno)
-            elif keyword == "TEST":
+            elif keyword in ("TEST", "HELPER"):
                 if current_test is not None:
                     tests.append(current_test)
                 if not rest:
-                    raise ParseError("TEST name is required", filename=filename, lineno=lineno)
+                    raise ParseError(f"{keyword} name is required", filename=filename, lineno=lineno)
                 if rest in test_map:
-                    raise ParseError(f"Duplicate test name '{rest}'", filename=filename, lineno=lineno)
+                    raise ParseError(f"Duplicate name '{rest}'", filename=filename, lineno=lineno)
                 current_test = {
                     "name": rest,
+                    "kind": "helper" if keyword == "HELPER" else "test",
                     "description": None,
                     "tags": [],
                     "base_url": suite.get("base_url"),
                     "headers": dict(suite.get("headers") or {}),
                     "setup": None,
                     "teardown": None,
+                    "depends": [],
                     "steps": [],
                     "examples": [],
                     "skip": None,
@@ -233,6 +397,11 @@ class TestParser:
             elif keyword == "TEARDOWN":
                 self._require_test(current_test, keyword, filename, lineno)
                 current_test["teardown"] = rest
+            elif keyword == "DEPENDS":
+                self._require_primary(current_test, keyword, filename, lineno)
+                for name in self._parse_depends(rest, filename, lineno):
+                    if name not in current_test["depends"]:
+                        current_test["depends"].append(name)
             elif keyword == "REQUEST":
                 self._require_test(current_test, keyword, filename, lineno)
                 current_step = self._parse_request(rest, filename, lineno)
@@ -255,17 +424,17 @@ class TestParser:
                 current_step["body_type"] = "graphql"
                 current_step["data"] = payload
             elif keyword == "EXAMPLES":
-                self._require_test(current_test, keyword, filename, lineno)
+                self._require_primary(current_test, keyword, filename, lineno)
                 rows, i = self._parse_examples(rest, lines, i, filename, lineno)
                 current_test["examples"] = rows
             elif keyword == "SKIP":
-                self._require_test(current_test, keyword, filename, lineno)
+                self._require_primary(current_test, keyword, filename, lineno)
                 current_test["skip"] = rest or "skipped"
             elif keyword == "ONLY":
-                self._require_test(current_test, keyword, filename, lineno)
+                self._require_primary(current_test, keyword, filename, lineno)
                 current_test["only"] = True
             elif keyword == "QUARANTINE":
-                self._require_test(current_test, keyword, filename, lineno)
+                self._require_primary(current_test, keyword, filename, lineno)
                 current_test["quarantine"] = rest or "quarantine"
             elif keyword == "HEADERS":
                 payload, i = self._read_json(rest, lines, i, filename, lineno)
@@ -330,8 +499,6 @@ class TestParser:
         suite["tests"] = tests
         suite["test_map"] = test_map
         suite.setdefault("options", {})
-        if "STOP-ON-FAILURE" not in suite["options"]:
-            suite["options"]["STOP-ON-FAILURE"] = True
         self._validate_suite(suite, filename)
         return suite
 
@@ -342,6 +509,9 @@ class TestParser:
         header_match = HEADER_LINE_RE.match(stripped)
         if header_match:
             return "HEADER", f"{header_match.group(1)}: {header_match.group(2)}"
+        spaced = SPACED_KEYWORD_RE.match(stripped)
+        if spaced:
+            return spaced.group(1), spaced.group(2).strip()
         raise ParseError(
             "Invalid line (expected KEYWORD: value)",
             filename=filename,
@@ -573,6 +743,13 @@ class TestParser:
                 retry_backoff = _parse_duration_seconds(retry_match.group(3), filename, lineno)
             rest = rest[: retry_match.start()].strip()
 
+        node = _ExpectExprParser(rest, filename, lineno, lambda slice_: self._parse_expect_atomic(slice_, filename, lineno)).parse()
+        node["retry"] = retry
+        node["retry_on"] = retry_on
+        node["retry_backoff"] = retry_backoff
+        return node
+
+    def _parse_expect_atomic(self, rest, filename, lineno):
         kind_match = EXPECT_KIND_RE.match(rest)
         if not kind_match:
             kind, _, _remainder = rest.partition(" ")
@@ -580,7 +757,7 @@ class TestParser:
 
         kind = kind_match.group(1).upper()
         remainder = kind_match.group(2).strip()
-        check = {"retry": retry, "retry_on": retry_on, "retry_backoff": retry_backoff}
+        check = {}
         if kind == "STATUS":
             if not remainder:
                 raise ParseError("EXPECT STATUS requires a status code", filename=filename, lineno=lineno)
@@ -813,7 +990,7 @@ class TestParser:
             if not stripped or stripped.startswith("//"):
                 last += 1
                 continue
-            if LINE_KEYWORD_RE.match(stripped) or HEADER_LINE_RE.match(stripped) or SUITE_HOOK_RE.match(stripped):
+            if LINE_KEYWORD_RE.match(stripped) or HEADER_LINE_RE.match(stripped):
                 break
             buf.append(stripped)
             last += 1
@@ -841,10 +1018,11 @@ class TestParser:
 
     def _validate_suite(self, suite, filename):
         test_map = suite["test_map"]
-        for field, label in (("setup", "SUITE SETUP"), ("teardown", "SUITE TEARDOWN")):
+        for field, label in (("setup", "SUITE-SETUP"), ("teardown", "SUITE-TEARDOWN")):
             name = suite.get(field)
             if name and name not in test_map:
                 raise ParseError(f"Unknown {label} test '{name}'", filename=filename)
+        helpers = _helper_names(suite)
         for test in suite["tests"]:
             for field in ("setup", "teardown"):
                 name = test.get(field)
@@ -854,36 +1032,77 @@ class TestParser:
                         filename=test.get("source") or filename,
                         lineno=test.get("lineno"),
                     )
+            for name in test.get("depends") or []:
+                if name not in test_map:
+                    raise ParseError(
+                        f"Unknown DEPENDS test '{name}' referenced by '{test['name']}'",
+                        filename=test.get("source") or filename,
+                        lineno=test.get("lineno"),
+                    )
+                if name == test["name"]:
+                    raise ParseError(
+                        f"TEST '{test['name']}' cannot DEPENDS on itself",
+                        filename=test.get("source") or filename,
+                        lineno=test.get("lineno"),
+                    )
+                if name in helpers or (test_map.get(name) or {}).get("kind") == "helper":
+                    raise ParseError(
+                        f"DEPENDS '{name}' is a HELPER, not a primary TEST",
+                        filename=test.get("source") or filename,
+                        lineno=test.get("lineno"),
+                    )
         self._detect_cycles(test_map, filename)
 
     def _detect_cycles(self, test_map, filename):
+        self._walk_cycles(test_map, filename, ("setup", "teardown"), "SETUP/TEARDOWN")
+        self._walk_cycles(test_map, filename, ("depends",), "DEPENDS")
+
+    def _walk_cycles(self, test_map, filename, fields, label):
         visiting = []
         seen = set()
+
+        def neighbors(test):
+            names = []
+            for field in fields:
+                value = test.get(field)
+                if isinstance(value, list):
+                    names.extend(value)
+                elif value:
+                    names.append(value)
+            return names
 
         def visit(name):
             if name in visiting:
                 cycle = visiting[visiting.index(name):] + [name]
                 raise ParseError(
-                    "SETUP/TEARDOWN cycle detected: " + " -> ".join(cycle),
+                    f"{label} cycle detected: " + " -> ".join(cycle),
                     filename=filename,
                 )
             if name in seen or name not in test_map:
                 return
             visiting.append(name)
-            test = test_map[name]
-            if test.get("setup"):
-                visit(test["setup"])
-            if test.get("teardown"):
-                visit(test["teardown"])
+            for nxt in neighbors(test_map[name]):
+                visit(nxt)
             visiting.pop()
             seen.add(name)
 
         for name in test_map:
             visit(name)
 
+    def _parse_depends(self, rest, filename, lineno):
+        names = [item.strip() for item in rest.split(",") if item.strip()]
+        if not names:
+            raise ParseError("DEPENDS requires a test name", filename=filename, lineno=lineno)
+        return names
+
     def _require_test(self, current_test, keyword, filename, lineno):
         if current_test is None:
-            raise ParseError(f"{keyword} must appear inside a TEST", filename=filename, lineno=lineno)
+            raise ParseError(f"{keyword} must appear inside a TEST or HELPER", filename=filename, lineno=lineno)
+
+    def _require_primary(self, current_test, keyword, filename, lineno):
+        self._require_test(current_test, keyword, filename, lineno)
+        if current_test.get("kind") == "helper":
+            raise ParseError(f"{keyword} cannot appear on a HELPER", filename=filename, lineno=lineno)
 
     def _require_step(self, current_step, keyword, filename, lineno):
         if current_step is None:

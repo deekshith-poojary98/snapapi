@@ -21,10 +21,13 @@ from requests.auth import HTTPDigestAuth
 from snapapi.api_client import APIClient, open_files
 from snapapi.cassette import cassette_key, load_cassettes, parse_vcr_match, save_cassette
 from snapapi.exceptions import JsonPathError, SnapAPIError, XPathError
+from snapapi.listeners import notify
 from snapapi.openapi import collect_parameters, load_spec, match_operation, request_body_schema, response_schema
+from snapapi.parser import walk_expect_checks
 from snapapi import jsonpath, xpath
-from snapapi.redact import redact_body, redact_headers
+from snapapi.redact import redact_body, redact_headers, redact_saved
 from snapapi.safety import assert_public_url
+from snapapi.select import eval_keyword_expr, eval_tag_expr
 from snapapi.variables import VAR_PATTERN, interpolate
 
 init(autoreset=True)
@@ -41,9 +44,11 @@ def format_duration(ms):
     return f"{ms / 1000:.2f}s"
 
 
-def _should_color(stream):
-    if os.environ.get("NO_COLOR"):
+def _should_color(stream, color=None):
+    if color is False or os.environ.get("NO_COLOR"):
         return False
+    if color is True:
+        return True
     target = sys.stdout if stream is None else stream
     if hasattr(target, "isatty") and target.isatty():
         return True
@@ -69,6 +74,8 @@ def helper_names(suite):
     if suite.get("teardown"):
         names.add(suite["teardown"])
     for test in suite.get("tests") or []:
+        if test.get("kind") == "helper":
+            names.add(test["name"])
         if test.get("setup"):
             names.add(test["setup"])
         if test.get("teardown"):
@@ -185,6 +192,9 @@ class Engine:
         retry_backoff=None,
         stream=None,
         grep=None,
+        keyword_expr=None,
+        tag_expr=None,
+        exclude_tags=None,
         include_skipped=False,
         include_quarantine=False,
         workers=1,
@@ -195,6 +205,8 @@ class Engine:
         safe_url=False,
         isolate_variables=None,
         last_failed=None,
+        failed_first=False,
+        prefer_failed=None,
         verify=True,
         cert=None,
         proxies=None,
@@ -202,6 +214,10 @@ class Engine:
         contract_strict=None,
         vcr_match=None,
         reruns=None,
+        listeners=None,
+        verbosity=1,
+        maxfail=None,
+        color=None,
     ):
         self.suite = suite
         self.variables = dict(variables or {})
@@ -213,8 +229,11 @@ class Engine:
         else:
             self.timeout = 30.0
         self.tags = list(tags or [])
+        self.exclude_tags = list(exclude_tags or [])
         self.names = list(names or [])
         self.grep = grep
+        self.keyword_expr = keyword_expr
+        self.tag_expr = tag_expr
         self.include_skipped = include_skipped
         self.include_quarantine = include_quarantine
         self.workers = max(1, int(workers or 1))
@@ -224,6 +243,8 @@ class Engine:
         self.cassette_dir = cassette_dir or options.get("CASSETTE_DIR") or ".snapapi/cassettes"
         self.safe_url = safe_url or _as_bool(options.get("SAFE-URL"), False)
         self.last_failed = list(last_failed or [])
+        self.failed_first = bool(failed_first)
+        self.prefer_failed = list(prefer_failed or [])
         self.verify = verify
         self.cert = cert
         self.proxies = dict(proxies or {})
@@ -233,13 +254,12 @@ class Engine:
         if isolate_variables is None:
             isolate_variables = self.workers > 1
         self.isolate_variables = isolate_variables
-        if stop_on_failure is not None:
-            self.stop_on_failure = bool(stop_on_failure)
-        else:
-            self.stop_on_failure = _as_bool(options.get("STOP-ON-FAILURE"), True)
+        self.stop_on_failure = bool(stop_on_failure)
         self.retry_backoff = RETRY_BACKOFF_SECONDS if retry_backoff is None else retry_backoff
         self.stream = stream
-        self._color = _should_color(stream)
+        self.verbosity = 1 if verbosity is None else int(verbosity)
+        self.maxfail = None if maxfail is None else max(1, int(maxfail))
+        self._color = _should_color(stream, color)
         self.failures = []
         self.success = []
         self._stack = []
@@ -257,14 +277,17 @@ class Engine:
             self.contract_strict = bool(contract_strict)
         self.vcr_match = parse_vcr_match(vcr_match if vcr_match is not None else options.get("VCR-MATCH"))
         self.reruns = max(0, int(options.get("RERUNS") or 0) if reruns is None else int(reruns))
+        self.listeners = list(listeners or [])
+        self._dep_status = {}
 
     def run(self):
         started = time.perf_counter()
         name = self.suite.get("name") or "suite"
         self._print(f"{self._paint('SnapAPI', Fore.CYAN, Style.BRIGHT)}  {name}")
-        if self.suite.get("description"):
+        if self.verbosity >= 1 and self.suite.get("description"):
             self._print(self._paint(self.suite["description"], Style.DIM))
         self._apply_sets(self.suite.get("sets"))
+        self._notify("start_suite", self._suite_info())
 
         results = []
         if self.suite.get("setup"):
@@ -272,13 +295,14 @@ class Engine:
             if setup_result.status == "failed":
                 results.append(
                     TestResult(
-                        name=f"SUITE SETUP ({self.suite['setup']})",
+                        name=f"SUITE-SETUP ({self.suite['setup']})",
                         status="failed",
                         error=setup_result.error,
                         requests=setup_result.requests,
                         duration_ms=setup_result.duration_ms,
                     )
                 )
+                self._notify("end_test", self._suite_info(), results[-1])
                 suite_result = SuiteResult(
                     name=self.suite.get("name"),
                     source=self.suite.get("source"),
@@ -286,6 +310,7 @@ class Engine:
                     duration_ms=(time.perf_counter() - started) * 1000,
                 )
                 self.print_summary(suite_result)
+                self._notify("end_suite", suite_result)
                 return suite_result
 
         primaries = self._primary_tests()
@@ -301,6 +326,8 @@ class Engine:
                 )
                 use_parallel = False
                 self.isolate_variables = False
+            elif any(test.get("depends") for test in primaries):
+                use_parallel = False
         if use_parallel:
             results.extend(self._run_parallel(primaries))
         else:
@@ -310,15 +337,37 @@ class Engine:
                     results.append(
                         TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped", error=skip_reason)
                     )
+                    self._record_dep_status(test["name"], "skipped")
+                    self._notify("end_test", self._suite_info(), results[-1])
                     continue
                 if not self._matches_filter(test):
                     results.append(TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped"))
+                    self._notify("end_test", self._suite_info(), results[-1])
                     continue
-                results.extend(self._run_examples(test))
-                if any(item.status == "failed" for item in results) and self.stop_on_failure:
+                dep_reason = self._depends_reason(test)
+                if dep_reason:
+                    self._print_skip(test, dep_reason)
+                    results.append(
+                        TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped", error=dep_reason)
+                    )
+                    self._record_dep_status(test["name"], "skipped")
+                    self._notify("end_test", self._suite_info(), results[-1])
+                    continue
+                self._notify("start_test", self._suite_info(), test["name"], test.get("tags") or [])
+                batch = self._run_examples(test)
+                self._record_dep_batch(test["name"], batch)
+                results.extend(batch)
+                for item in batch:
+                    self._notify("end_test", self._suite_info(), item)
+                if self._should_stop(results):
+                    hint = (
+                        "omit -x / --stop-on-failure to continue"
+                        if self.stop_on_failure
+                        else "stopped by --maxfail"
+                    )
                     self._print(
                         self._paint(
-                            f"  stopped after {test['name']!r}  (set STOP-ON-FAILURE: false to continue)",
+                            f"  stopped after {test['name']!r}  ({hint})",
                             Fore.RED,
                         )
                     )
@@ -334,6 +383,7 @@ class Engine:
             duration_ms=(time.perf_counter() - started) * 1000,
         )
         self.print_summary(suite_result)
+        self._notify("end_suite", suite_result)
         return suite_result
 
     def print_summary(self, suite_result=None):
@@ -439,9 +489,11 @@ class Engine:
                 results.append(
                     TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped", error=skip_reason)
                 )
+                self._notify("end_test", self._suite_info(), results[-1])
                 continue
             if not self._matches_filter(test):
                 results.append(TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped"))
+                self._notify("end_test", self._suite_info(), results[-1])
                 continue
             runnable.append(test)
         if not runnable:
@@ -453,7 +505,7 @@ class Engine:
             in_flight = {}
 
             def submit_next():
-                if self.stop_on_failure and stop_scheduling.is_set():
+                if stop_scheduling.is_set():
                     return False
                 try:
                     test = next(iterator)
@@ -478,11 +530,13 @@ class Engine:
                         self._print(output.rstrip("\n"))
                     batch = batch if isinstance(batch, list) else [batch]
                     results.extend(batch)
-                    if self.stop_on_failure and any(item.status == "failed" for item in batch):
+                    for item in batch:
+                        self._notify("end_test", self._suite_info(), item)
+                    if self._should_stop(results):
                         stop_scheduling.set()
                         for pending in list(in_flight):
                             pending.cancel()
-                if not (self.stop_on_failure and stop_scheduling.is_set()):
+                if not stop_scheduling.is_set():
                     submit_next()
 
         return self._sort_parallel_results(results, primaries)
@@ -505,6 +559,9 @@ class Engine:
             retry_backoff=self.retry_backoff,
             stream=io.StringIO(),
             grep=self.grep,
+            keyword_expr=self.keyword_expr,
+            tag_expr=self.tag_expr,
+            exclude_tags=self.exclude_tags,
             include_skipped=self.include_skipped,
             include_quarantine=self.include_quarantine,
             workers=1,
@@ -515,6 +572,7 @@ class Engine:
             safe_url=self.safe_url,
             isolate_variables=True,
             last_failed=self.last_failed,
+            failed_first=False,
             verify=self.verify,
             cert=self.cert,
             proxies=self.proxies,
@@ -522,6 +580,8 @@ class Engine:
             contract_strict=self.contract_strict,
             vcr_match=self.vcr_match,
             reruns=self.reruns,
+            verbosity=self.verbosity,
+            color=self._color,
         )
         child._oauth_cache = self._oauth_cache
         child._cassettes = self._cassettes
@@ -874,6 +934,20 @@ class Engine:
 
     def _execute_check(self, check, response, duration_ms=0, method=None, url=None):
         check_type = check["type"]
+        if check_type == "AND":
+            for term in check.get("terms") or []:
+                self._execute_check(term, response, duration_ms, method, url)
+            return
+        if check_type == "OR":
+            errors = []
+            for term in check.get("terms") or []:
+                try:
+                    self._execute_check(term, response, duration_ms, method, url)
+                    return
+                except AssertionError as exc:
+                    errors.append(str(exc))
+            detail = "; ".join(errors) if errors else "no alternatives"
+            raise AssertionError(f"OR expected at least one check to pass: {detail}")
         if check_type == "STATUS":
             expected = int(interpolate(str(check["value"]), self.variables))
             actual = response.status_code
@@ -1062,7 +1136,8 @@ class Engine:
                 raise AssertionError(str(exc)) from exc
         self.variables[save["name"]] = value
         indent = self._spaces(1)
-        self._print(self._paint(f"{indent}saved {save['name']}={value}", Style.DIM))
+        shown = redact_saved(save["name"], value)
+        self._print(self._paint(f"{indent}saved {save['name']}={shown}", Style.DIM))
 
     def _oauth_token(self, spec, force_refresh=False):
         token_url = interpolate(spec.get("token_url"), self.variables)
@@ -1164,12 +1239,13 @@ class Engine:
         if self._openapi_spec is not None:
             specs.append((self._openapi_spec, self.contract_strict))
         for check in checks or []:
-            if check.get("type") != "OPENAPI":
-                continue
-            spec = self._load_openapi_spec(check.get("path"))
-            if spec is None:
-                continue
-            specs.append((spec, bool(check.get("strict")) or self.contract_strict))
+            for item in walk_expect_checks(check):
+                if item.get("type") != "OPENAPI":
+                    continue
+                spec = self._load_openapi_spec(item.get("path"))
+                if spec is None:
+                    continue
+                specs.append((spec, bool(item.get("strict")) or self.contract_strict))
         seen = set()
         for spec, strict in specs:
             marker = id(spec)
@@ -1281,10 +1357,28 @@ class Engine:
         selected = only or primaries
         if self.last_failed:
             selected = [test for test in selected if self._matches_last_failed(test)]
+        if self.failed_first:
+            selected = sorted(
+                selected,
+                key=lambda test: 0 if self._matches_failed_list(self.prefer_failed or self.last_failed, test) else 1,
+            )
         return selected
 
+    def matching_tests(self):
+        tests = []
+        for test in self._primary_tests():
+            if self._skip_reason(test):
+                continue
+            if not self._matches_filter(test):
+                continue
+            tests.append(test)
+        return tests
+
     def _matches_last_failed(self, test):
-        return any(self._identity_matches(item, test) for item in self.last_failed)
+        return self._matches_failed_list(self.last_failed, test)
+
+    def _matches_failed_list(self, items, test):
+        return any(self._identity_matches(item, test) for item in items or [])
 
     def _identity_matches(self, item, test):
         if isinstance(item, str):
@@ -1335,21 +1429,83 @@ class Engine:
             return test.get("quarantine") or "quarantine"
         return None
 
+    def _depends_reason(self, test):
+        for name in test.get("depends") or []:
+            status = self._dep_status.get(name)
+            if status is None:
+                return f"depends on {name!r} which has not run"
+            if status == "failed":
+                return f"depends on {name!r} which failed"
+            if status == "skipped":
+                return f"depends on {name!r} which was skipped"
+        return None
+
+    def _record_dep_status(self, name, status):
+        self._dep_status[name] = status
+
+    def _record_dep_batch(self, name, batch):
+        statuses = [item.status for item in batch]
+        if any(status == "failed" for status in statuses):
+            self._dep_status[name] = "failed"
+        elif statuses and all(status == "skipped" for status in statuses):
+            self._dep_status[name] = "skipped"
+        elif any(status == "passed" for status in statuses):
+            self._dep_status[name] = "passed"
+        else:
+            self._dep_status[name] = "skipped"
+
+    def _print_skip(self, test, reason):
+        if self.verbosity < 1:
+            return
+        tags = test.get("tags") or []
+        tag_part = self._paint(f"  [{', '.join(tags)}]", Style.DIM) if tags else ""
+        self._print()
+        self._print(f"{test['name']}{tag_part}")
+        self._print(f"  {self._paint('SKIP', Fore.YELLOW, Style.BRIGHT)}  {self._paint(reason, Style.DIM)}")
+
     def _matches_filter(self, test):
         if self.tags:
             test_tags = set(test.get("tags") or [])
             if not all(tag in test_tags for tag in self.tags):
                 return False
+        if self.exclude_tags:
+            test_tags = {str(tag).lower() for tag in test.get("tags") or []}
+            if any(str(tag).lower() in test_tags for tag in self.exclude_tags):
+                return False
+        if self.tag_expr is not None and not eval_tag_expr(self.tag_expr, test.get("tags") or []):
+            return False
         if self.grep:
             blob = f"{test.get('name') or ''} {test.get('description') or ''}"
             if not re.search(self.grep, blob, re.IGNORECASE):
                 return False
+        if self.keyword_expr is not None:
+            blob = " ".join(
+                [
+                    str(test.get("name") or ""),
+                    str(test.get("description") or ""),
+                    " ".join(test.get("tags") or []),
+                ]
+            )
+            if not eval_keyword_expr(self.keyword_expr, blob):
+                return False
         return True
+
+    def _should_stop(self, results):
+        failed = sum(1 for item in results if item.status == "failed")
+        if failed <= 0:
+            return False
+        if self.stop_on_failure:
+            return True
+        if self.maxfail is not None and failed >= self.maxfail:
+            return True
+        return False
 
     def _matches_tags(self, test):
         return self._matches_filter(test)
 
     def _announce(self, test, role):
+        if self.verbosity < 1:
+            return
         if role == "test" and len(self._stack) == 1:
             self._print()
         indent = self._spaces(0)
@@ -1361,6 +1517,8 @@ class Engine:
         self._print(self._paint(f"{indent}{role} {test['name']}", Style.DIM))
 
     def _print_request(self, method, endpoint, status_code, duration_ms):
+        if self.verbosity < 1:
+            return
         indent = self._spaces(1)
         request = f"{method} {endpoint}"
         if len(request) < REQUEST_COL_WIDTH:
@@ -1406,6 +1564,8 @@ class Engine:
                 path.write_text(json.dumps(_as_har(recorded), indent=2) + "\n", encoding="utf-8")
 
     def _print_outcome(self, passed, duration_ms):
+        if self.verbosity < 1:
+            return
         indent = self._spaces(1)
         label = (
             self._paint("PASS", Fore.GREEN, Style.BRIGHT)
@@ -1426,6 +1586,20 @@ class Engine:
     def _print(self, message=""):
         with self._print_lock:
             print(message, file=self.stream)
+
+    def _suite_info(self):
+        return {
+            "name": self.suite.get("name"),
+            "source": self.suite.get("source"),
+            "description": self.suite.get("description"),
+        }
+
+    def _notify(self, method, *args):
+        notify(self.listeners, method, *args, on_error=self._listener_error)
+
+    def _listener_error(self, listener, method, exc):
+        name = getattr(listener, "__class__", type(listener)).__name__
+        self._print(self._paint(f"  warning: listener {name}.{method} failed: {exc}", Fore.YELLOW))
 
     def _base_dir(self):
         source = self.suite.get("source")

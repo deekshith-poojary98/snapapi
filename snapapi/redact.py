@@ -14,6 +14,10 @@ SENSITIVE_HEADERS = {
 }
 BEARER_RE = re.compile(r"(?i)\b(bearer)\s+\S+")
 TOKENISH_RE = re.compile(r"(?i)(token|secret|password|passwd|api[_-]?key)\s*[:=]\s*\S+")
+SENSITIVE_NAME_RE = re.compile(
+    r"(?i)(token|secret|password|passwd|authorization|cookie|jwt|api[_-]?key)"
+)
+JWT_RE = re.compile(r"^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 
 
 def header_name_is_sensitive(name):
@@ -28,6 +32,20 @@ def redact_value(value):
     text = BEARER_RE.sub(r"\1 " + REDACTED, value)
     text = TOKENISH_RE.sub(lambda match: match.group(0).split()[0] + " " + REDACTED, text)
     return text
+
+
+def redact_saved(name, value):
+    """Return a CLI-safe display value for SAVE output.
+
+    Tokens, passwords, cookies, and JWT-shaped strings print as ``***``.
+    Ordinary ids and emails stay visible.
+    """
+    if value is None:
+        return value
+    text = str(value)
+    if SENSITIVE_NAME_RE.search(str(name or "")) or JWT_RE.match(text):
+        return REDACTED
+    return value
 
 
 def redact_headers(headers):
