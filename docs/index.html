@@ -3,15 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
   <title>SnapAPI — HTTP API testing DSL</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="layout">
-    <aside class="sidebar">
-      <a class="brand" href="index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
       <div class="nav-label">Guide</div>
-      <nav>
+      <nav aria-label="Docs">
         <a class="active" href="index.html">Home</a>
         <a href="index.html#why">Why SnapAPI?</a>
         <a href="guide/install.html">Install</a>
@@ -24,8 +29,8 @@
       </nav>
       <p class="hint">Python 3.9+ CLI. The playground runs a subset of the DSL in your browser against a mock API.</p>
     </aside>
-    <main class="content">
-      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false">Menu</button>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
       <p class="kicker">User guide</p>
       <h1>Write HTTP API tests as plain text, then run them.</h1>
       <p class="lede">SnapAPI is a Python HTTP testing DSL. You author <code>.sapi</code> files with <code>GET</code>, <code>POST</code>, <code>EXPECT</code>, and <code>SAVE</code>, then run <code>snapapi file.sapi</code>. No YAML maze, no generated client. The older <code>.snaptest</code> extension still works.</p>
