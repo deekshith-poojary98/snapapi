@@ -83,22 +83,35 @@ def resolve_env_file(explicit, suite_path):
     return discover_env_file(suite_path)
 
 
-def interpolate(value, variables):
+def interpolate(value, variables, plugins=None):
     """Replace helpers and ``${VAR}`` in strings; walk dicts and lists."""
-    value = expand_helpers(value)
+    value = expand_helpers(value, plugins=plugins, variables=variables)
     if isinstance(value, str):
-        return _interpolate_string(value, variables)
+        return _interpolate_string(value, variables, plugins=plugins)
     if isinstance(value, dict):
         return {
-            interpolate(key, variables): interpolate(item, variables)
+            interpolate(key, variables, plugins=plugins): interpolate(item, variables, plugins=plugins)
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [interpolate(item, variables) for item in value]
+        return [interpolate(item, variables, plugins=plugins) for item in value]
     return value
 
 
-def _interpolate_string(value, variables):
+WHOLE_VAR = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+
+
+def _interpolate_string(value, variables, plugins=None):
+    whole = WHOLE_VAR.match(value)
+    if whole:
+        name = whole.group(1)
+        if name not in variables or variables[name] is None:
+            hint = ""
+            if name.isupper():
+                hint = ". Set it in the environment or pass --env"
+            raise SnapAPIError(f"Undefined variable ${{{name}}}{hint}")
+        return variables[name]
+
     def repl(match):
         name = match.group(1)
         if name not in variables or variables[name] is None:
@@ -106,6 +119,11 @@ def _interpolate_string(value, variables):
             if name.isupper():
                 hint = ". Set it in the environment or pass --env"
             raise SnapAPIError(f"Undefined variable ${{{name}}}{hint}")
-        return str(variables[name])
+        resolved = variables[name]
+        if isinstance(resolved, (dict, list, bool)):
+            from snapapi.plugins import format_extension_value
+
+            return format_extension_value(resolved)
+        return str(resolved)
 
     return VAR_PATTERN.sub(repl, value)

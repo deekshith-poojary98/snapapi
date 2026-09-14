@@ -20,6 +20,7 @@
         <a class="active" href="index.html">Home</a>
         <a href="guide/install.html">Install</a>
         <a href="guide/quick-start.html">Quick start</a>
+        <a href="guide/not-for-you.html">When not</a>
       </nav>
       <div class="nav-label">Learn</div>
       <nav aria-label="Learn">
@@ -33,6 +34,7 @@
       <nav aria-label="Reference">
         <a href="guide/dsl.html">DSL</a>
         <a href="guide/cli.html">CLI</a>
+        <a href="guide/plugins.html">Plugins</a>
         <a href="guide/ci.html">CI</a>
         <a href="guide/vscode.html">VS Code</a>
         <a href="guide/troubleshooting.html">Troubleshooting</a>
@@ -97,6 +99,14 @@
         <li>Running from the CLI, or from Python with <code>run_suites</code></li>
       </ul>
 
+      <h2 id="when-not">When SnapAPI is not for you</h2>
+      <p>SnapAPI isn’t designed to replace every API testing framework.</p>
+      <p>If your tests need complex programming logic, custom cryptography inside the suite, extensive Python fixtures, WebSockets, gRPC, or highly customized execution flows, keep your existing framework.</p>
+      <p>SnapAPI is for teams whose API tests mostly look like:</p>
+      <p class="pitch"><strong>request → assert → extract → request → assert</strong></p>
+      <p>If that’s 80% of your suite, SnapAPI makes that 80% easier to read, review, and maintain. The other 20% stays in Python — <a href="guide/plugins.html"><code>CALL</code></a> from <code>extensions/</code> for one ugly value, or pytest around the runner. Not <code>IF</code> / <code>FOR</code> / <code>WHILE</code> in the <code>.sapi</code> file.</p>
+      <p>The longer version: <a href="guide/not-for-you.html">When SnapAPI is not for you</a>.</p>
+
       <h2>What it looks like</h2>
       <pre><code class="language-snaptest">SUITE: Hello API
 URL: mock://api
@@ -105,8 +115,8 @@ TEST: Get Users
   GET: /users
   EXPECT: status == 200</code></pre>
       <p><code>mock://api</code> is the playground’s fake server. On your laptop, <a href="guide/quick-start.html">quick start</a> uses <code>snapapi mock</code> instead. Don’t try <code>api.example.com</code> — that host isn’t ours.</p>
-      <h2>What it isn’t</h2>
-      <p>No language server, no gRPC, no WebSockets. OpenAPI checks exist if you want them; they’re not a spec toolchain. The playground covers a useful chunk of the language. FILE, GRAPHQL, IMPORT, oauth2, schema, and XPath still need the Python CLI.</p>
+      <h2>Playground vs CLI</h2>
+      <p>No language server, no gRPC, no WebSockets. OpenAPI checks exist if you want them; they’re not a spec toolchain. The playground covers a useful chunk of the language. FILE, GRAPHQL, IMPORT, oauth2, schema, XPath, and <a href="guide/plugins.html"><code>CALL</code></a> still need the CLI.</p>
       <div class="page-nav">
         <a href="guide/install.html" rel="next"><span>Next</span><strong>Install</strong></a>
       </div>

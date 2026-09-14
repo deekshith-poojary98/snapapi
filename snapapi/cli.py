@@ -12,6 +12,7 @@ from snapapi.history import append_history, format_history, read_history, read_l
 from snapapi.lint import format_issues, lint_files
 from snapapi.listeners import finish_listeners, load_listeners, notify
 from snapapi.openapi import generate_smoke
+from snapapi.plugins import build_registry, load_plugins
 from snapapi.parser import TestParser
 from snapapi.profiles import load_profile
 from snapapi.reports import build_report_payload, write_html_report, write_json_report, write_junit_report
@@ -35,6 +36,13 @@ def build_parser():
     lint.add_argument("--env", dest="env_file")
     lint.add_argument("--profile")
     lint.add_argument("--strict", action="store_true", help="Treat unused SAVE as errors")
+    lint.add_argument(
+        "--plugin",
+        action="append",
+        dest="plugins",
+        metavar="PATH[:name]",
+        help="Extra Python extension (repeatable). Prefer extensions/ or snapapi.yaml.",
+    )
 
     fmt = sub.add_parser("fmt", help="Format .sapi files")
     fmt.add_argument("paths", nargs="+")
@@ -114,6 +122,13 @@ def _add_run_args(parser, optional=False):
         metavar="PATH[:Class]",
         help="Python listener module or file (repeatable)",
     )
+    parser.add_argument(
+        "--plugin",
+        action="append",
+        dest="plugins",
+        metavar="PATH[:name]",
+        help="Extra Python extension file or module (repeatable). Prefer extensions/ or snapapi.yaml.",
+    )
 
 
 def collect_files(paths):
@@ -185,6 +200,7 @@ def run_suites(
     vcr_match=None,
     reruns=None,
     listeners=None,
+    plugins=None,
     close_listeners=True,
     verbosity=1,
     maxfail=None,
@@ -230,6 +246,7 @@ def run_suites(
                 vcr_match=vcr_match,
                 reruns=reruns,
                 listeners=loaded,
+                plugins=plugins,
                 verbosity=verbosity,
                 maxfail=remaining,
                 color=color,
@@ -310,6 +327,7 @@ def _run_from_args(args):
         mode = "replay"
         record_on_miss = True
     listeners = load_listeners(getattr(args, "listeners", None))
+    plugins = load_plugins(getattr(args, "plugins", None))
     stop_on_failure = bool(args.stop_on_failure)
     maxfail = getattr(args, "maxfail", None)
     if maxfail is not None:
@@ -347,6 +365,7 @@ def _run_from_args(args):
         vcr_match=getattr(args, "vcr_match", None),
         reruns=getattr(args, "reruns", None),
         listeners=listeners,
+        plugins=plugins or None,
         close_listeners=False,
         verbosity=_verbosity(args),
         maxfail=maxfail,
@@ -378,18 +397,33 @@ def _cmd_lint(argv):
     parser.add_argument("--env", dest="env_file")
     parser.add_argument("--profile")
     parser.add_argument("--strict", action="store_true")
+    parser.add_argument(
+        "--plugin",
+        action="append",
+        dest="plugins",
+        metavar="PATH[:name]",
+        help="Extra Python extension (repeatable). Prefer extensions/ or snapapi.yaml.",
+    )
     args = parser.parse_args(argv)
     files = collect_files(args.paths)
     extra = {}
     if args.profile:
         extra.update(load_profile(args.profile))
+    plugin_specs = getattr(args, "plugins", None)
     issues = []
     for path in files:
         variables = base_variables(
             env_file=resolve_env_file(args.env_file, path),
             extra=extra or None,
         )
-        issues.extend(lint_files([path], variables=variables, strict=args.strict))
+        issues.extend(
+            lint_files(
+                [path],
+                variables=variables,
+                strict=args.strict,
+                plugins=build_registry(path, specs=plugin_specs).names(),
+            )
+        )
     text = format_issues(issues)
     if text:
         print(text)

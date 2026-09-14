@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
+  <title>When SnapAPI is not for you</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
+        <a href="../index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a class="active" href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
+        <a href="cli.html">CLI</a>
+        <a href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
+        <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">Keep the other 20% in Python.</p>
+    </aside>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
+      <p class="kicker">Start</p>
+      <h1>When SnapAPI is not for you</h1>
+      <p class="lede">SnapAPI isn’t designed to replace every API testing framework. That’s on purpose.</p>
+
+      <p>If your tests need complex programming logic, custom cryptography inside the suite, extensive Python fixtures, WebSockets, gRPC, or highly customized execution flows, keep your existing framework.</p>
+      <p>SnapAPI is for teams whose API tests mostly look like:</p>
+      <p class="pitch"><strong>request → assert → extract → request → assert</strong></p>
+      <p>If that’s 80% of your suite, SnapAPI makes that 80% easier to read, review, and maintain.</p>
+
+      <div class="split">
+        <div>
+          <h3>Use SnapAPI</h3>
+          <ul>
+            <li>The file should read as the HTTP contract</li>
+            <li>Smoke, regression, OpenAPI checks</li>
+            <li>Someone who doesn’t write Python can still review the PR</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Keep the other tool</h3>
+          <ul>
+            <li>Loops, branches, try/catch as the test</li>
+            <li>WebSockets, SSE, gRPC</li>
+            <li>Importing 2,000 existing pytest/Karate/Postman cases</li>
+          </ul>
+        </div>
+      </div>
+
+      <h2>The language stays small</h2>
+      <p>There is no <code>IF</code>, <code>FOR</code>, <code>WHILE</code>, or <code>TRY</code> in <code>.sapi</code> files. Adding those would make the file a worse Python, and you’d lose the reason to use SnapAPI.</p>
+      <p>One ugly value — an HMAC, a weird timestamp — belongs in <a href="plugins.html"><code>CALL</code></a>. Python lives in <code>extensions/</code>. The suite never names a <code>.py</code> file. It cannot skip steps, fire extra requests, or branch the suite.</p>
+      <p>Listeners and <code>run_suites()</code> wrap the run. Plugins fill a hole <em>inside</em> a request. Pytest stays the hatch for everything else.</p>
+
+      <h2>The test that matters</h2>
+      <p>Can someone look at a <code>.sapi</code> file and understand the exact HTTP contract without knowing a programming language?</p>
+      <p>If a feature makes that answer “no,” it doesn’t belong in the DSL.</p>
+      <div class="page-nav">
+        <a href="quick-start.html" rel="prev"><span>Previous</span><strong>Quick start</strong></a>
+        <a href="plugins.html" rel="next"><span>Next</span><strong>Plugins</strong></a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

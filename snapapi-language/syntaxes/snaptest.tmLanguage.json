@@ -278,7 +278,7 @@
                     ]
                 },
                 {
-                    "begin": "^(\\s*)(DESC|URL|TIMEOUT|TAG|QUERY|PARAM|FILE|GRAPHQL|EXAMPLES|SKIP|ONLY|QUARANTINE|FOLLOW-REDIRECTS|WAIT|SET|DEPENDS)(:)",
+                    "begin": "^(\\s*)(DESC|URL|TIMEOUT|TAG|QUERY|PARAM|FILE|GRAPHQL|EXAMPLES|SKIP|ONLY|QUARANTINE|FOLLOW-REDIRECTS|WAIT|SET|CALL|DEPENDS)(:)",
                     "end": "$",
                     "beginCaptures": {
                         "2": {

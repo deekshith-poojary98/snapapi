@@ -8,6 +8,8 @@
 
 SnapAPI is a small language for HTTP tests. Write a `.sapi` file, run `snapapi`, get PASS or FAIL.
 
+It is not a replacement for every API framework. If your tests are mostly **request → assert → extract → request → assert**, that's the 80% SnapAPI is for. Loops, custom crypto inside the suite, WebSockets, gRPC, or importing 2,000 existing cases: keep the tool you have. One ugly value is [`CALL`](https://deekshith-poojary98.github.io/snapapi/guide/plugins.html) from `extensions/`. There is no `IF` / `FOR` / `WHILE` in the file — [when SnapAPI is not for you](https://deekshith-poojary98.github.io/snapapi/guide/not-for-you.html).
+
 **Start here:** [playground](https://deekshith-poojary98.github.io/snapapi/playground.html) (no install) → [quick start](https://deekshith-poojary98.github.io/snapapi/guide/quick-start.html) (same GET on the CLI).
 
 The PyPI package is **`pysnapapi`**. The command is **`snapapi`**. `pip install snapapi` is a different project.
@@ -64,7 +66,7 @@ Guide pages, in order:
 4. [HELPER / SETUP](https://deekshith-poojary98.github.io/snapapi/guide/helpers.html)
 5. [Your API](https://deekshith-poojary98.github.io/snapapi/guide/your-api.html) — put your real origin in `URL:`
 
-[Troubleshooting](https://deekshith-poojary98.github.io/snapapi/guide/troubleshooting.html) if you’re stuck. Flag tables below are reference.
+[When SnapAPI is not for you](https://deekshith-poojary98.github.io/snapapi/guide/not-for-you.html) · [CALL](https://deekshith-poojary98.github.io/snapapi/guide/plugins.html) (`extensions/`) · [Troubleshooting](https://deekshith-poojary98.github.io/snapapi/guide/troubleshooting.html) if you’re stuck. Flag tables below are reference.
 
 ## Features
 
@@ -76,6 +78,7 @@ Guide pages, in order:
 - Env files, tag filters, timeouts, retries, JSON and JUnit reports
 - OpenAPI response/request contract checks, VCR cassettes, JSON mock server
 - pytest plugin (`snapapi_run` / `@pytest.mark.snapapi`)
+- Python `CALL` / `extensions/` for values the HTTP DSL will not grow keywords for
 - VS Code syntax highlighting and diagnostics for `.sapi` files
 
 ## Requirements
@@ -158,6 +161,7 @@ Options:
 | `--contract-strict` | Fail when an OpenAPI path/method/schema is missing (default: skip/warn) |
 | `--reruns N` | Re-run failed *tests* up to N times (distinct from `EXPECT RETRY`) |
 | `--listener PATH[:Class]` | Python listener called after each test / suite (repeatable) |
+| `--plugin PATH[:name]` | Extra Python extension (repeatable). Prefer `extensions/` or `snapapi.yaml` |
 | `--on-fail curl` / `--on-fail har:dir` | Emit a redacted curl or HAR on failure |
 | `--safe-url` | Block private/metadata hosts |
 | `--proxy URL` | HTTP/HTTPS proxy |
@@ -233,10 +237,10 @@ EXPECT: HEADER Content-Type CONTAINS json
 
 ### Keywords
 
-- Suite: `SUITE`, `DESC`, `URL`, `TIMEOUT`, `FOLLOW-REDIRECTS`, `OPTIONS`, `IMPORT`, `SUITE-SETUP`, `SET`
-- Test: `TEST`, `TAG`, `SETUP`, `TEARDOWN`, `DEPENDS`, `SKIP`, `ONLY`, `QUARANTINE`, `EXAMPLES`, `SET`
+- Suite: `SUITE`, `DESC`, `URL`, `TIMEOUT`, `FOLLOW-REDIRECTS`, `OPTIONS`, `IMPORT`, `SUITE-SETUP`, `SET`, `CALL`
+- Test: `TEST`, `TAG`, `SETUP`, `TEARDOWN`, `DEPENDS`, `SKIP`, `ONLY`, `QUARANTINE`, `EXAMPLES`, `SET`, `CALL`
 - Helper: `HELPER` (named procedure for `SUITE-SETUP` / `SETUP` / `TEARDOWN`; not a test case)
-- Request: `REQUEST`, `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`, `BODY`/`DATA`, `FILE`, `GRAPHQL`, `HEADER`/`HEADERS`, `QUERY`, `PARAM`, `AUTH`, `EXPECT`, `SAVE`, `WAIT`, `SET`
+- Request: `REQUEST`, `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`, `BODY`/`DATA`, `FILE`, `GRAPHQL`, `HEADER`/`HEADERS`, `QUERY`, `PARAM`, `AUTH`, `EXPECT`, `SAVE`, `WAIT`, `SET`, `CALL`
 
 HTTP `OPTIONS` is written as `REQUEST: OPTIONS /path` so it does not collide with suite-level `OPTIONS: {...}` JSON. `HEAD: /x` is a request alias like `GET:`.
 
@@ -331,7 +335,9 @@ XPath uses stdlib `xml.etree` (descendant tags and `/@attr`). Axes, namespaces, 
 
 `${NAME}` is expanded in URLs, paths, headers, data, and expect values.
 
-Lookup order: process environment, then `--env` / auto-discovered suite env file, then `SET` / `SAVE` values.
+Lookup order: process environment, then `--env` / auto-discovered suite env file, then `SET` / `SAVE` / `CALL` values.
+
+Built-in functions: `${uuid()}`, `${now()}`, `${random.int(min,max)}`. Custom functions use `CALL: signature = crypto.generate_signature(${PAYLOAD}, ${SECRET})` with modules in `extensions/`. They take explicit arguments and cannot skip steps or make HTTP.
 
 ## Sample suite
 
@@ -339,7 +345,7 @@ Lookup order: process environment, then `--env` / auto-discovered suite env file
 
 HTML reports include redacted request/response bodies. VCR cassette keys include method, path, and (by default) sorted query string, `Content-Type`/`Accept`, and body. `OPTIONS: {"VCR-MATCH": ["query","body","accept","authorization"]}` or `--vcr-match authorization,query` replaces that default. Replay restores `Set-Cookie` onto the session.
 
-`snapapi mock tests/fixtures/mock.json --port 0` serves JSON routes. Routes may use path templates (`/users/{id}`), optional `match.query` / `match.body` subsets, and `delay_ms`. Exact paths win over templates. There is no language server, gRPC, or WebSocket support.
+`snapapi mock tests/fixtures/mock.json --port 0` serves JSON routes. Routes may use path templates (`/users/{id}`), optional `match.query` / `match.body` subsets, and `delay_ms`. Exact paths win over templates. There is no language server, gRPC, or WebSocket support. Python plugins are CLI-only (not the playground).
 
 ### pytest plugin
 
@@ -355,7 +361,7 @@ def test_marked(snapapi_run, request):
     snapapi_run(request.node.get_closest_marker("snapapi").args[0])
 ```
 
-`snapapi_run(path, **engine_kwargs)` returns `SuiteResult` and fails the pytest case when the suite is not ok.
+`snapapi_run(path, **engine_kwargs)` returns `SuiteResult` and fails the pytest case when the suite is not ok. Pass `plugins={"hmac": hmac}` if you are not using `extensions/`.
 
 ## Project layout
 
@@ -367,7 +373,7 @@ snapapi/
 │   ├── api_client.py     # requests wrapper
 │   └── cli.py            # snapapi command
 ├── tests/                # pytest + sample .sapi / .snaptest suites
-├── examples/             # hello GET and users POST/SAVE/AUTH/HELPER
+├── examples/             # hello GET, users POST/SAVE/AUTH/HELPER, plugins
 ├── docs/                 # User guide + in-browser playground
 ├── snapapi-language/     # VS Code grammar / run command
 ├── pyproject.toml

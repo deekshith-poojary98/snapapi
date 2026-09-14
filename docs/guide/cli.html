@@ -20,6 +20,7 @@
         <a href="../index.html">Home</a>
         <a href="install.html">Install</a>
         <a href="quick-start.html">Quick start</a>
+        <a href="not-for-you.html">When not</a>
       </nav>
       <div class="nav-label">Learn</div>
       <nav aria-label="Learn">
@@ -33,6 +34,7 @@
       <nav aria-label="Reference">
         <a href="dsl.html">DSL</a>
         <a class="active" href="cli.html">CLI</a>
+        <a href="plugins.html">Plugins</a>
         <a href="ci.html">CI</a>
         <a href="vscode.html">VS Code</a>
         <a href="troubleshooting.html">Troubleshooting</a>
@@ -86,6 +88,8 @@ snapapi tests/</code></pre>
           <tr><td><code>--proxy URL</code></td><td>HTTP/HTTPS proxy.</td></tr>
           <tr><td><code>--insecure</code></td><td>Skip TLS certificate verification.</td></tr>
           <tr><td><code>--cert PATH</code> / <code>--cacert PATH</code></td><td>Client certificate and CA bundle.</td></tr>
+          <tr><td><code>--listener PATH[:Class]</code></td><td>Python listener called after each test / suite (repeatable).</td></tr>
+          <tr><td><code>--plugin PATH[:name]</code></td><td>Extra Python extension (repeatable). Prefer <code>extensions/</code> or <code>snapapi.yaml</code>. See <a href="plugins.html">CALL</a>.</td></tr>
           <tr><td><code>-V</code> / <code>--version</code></td><td>Print the SnapAPI version.</td></tr>
         </tbody>
       </table>
@@ -94,7 +98,7 @@ snapapi tests/</code></pre>
       <p>Parse and validate without making HTTP calls.</p>
       <pre><code class="language-bash">snapapi lint tests/
 snapapi lint users.sapi --strict</code></pre>
-      <p><code>--strict</code> treats unused SAVE as errors. <code>--env</code> and <code>--profile</code> are available so interpolation can be checked. Exit <code>2</code> if any issue is an error.</p>
+      <p><code>--strict</code> treats unused SAVE as errors. <code>--env</code>, <code>--profile</code>, and <code>--plugin</code> are available so interpolation can be checked. Exit <code>2</code> if any issue is an error.</p>
 
       <h2>fmt</h2>
       <pre><code class="language-bash">snapapi fmt tests/
@@ -144,6 +148,7 @@ snapapi tests/ --listener examples/print_listener.py:PrintListener --report html
     def close(self):
         ...</code></pre>
       <p>From Python, pass instances to <code>run_suites(..., listeners=[JiraReporter()], close_listeners=True)</code>. The CLI writes reports, then calls <code>report_written</code>, then <code>close</code>.</p>
+      <p>Listeners wrap the run. They don’t compute a header on this POST. That’s <a href="plugins.html"><code>CALL</code></a>.</p>
 
       <h2>From Python</h2>
       <p>Call the same runner the CLI uses:</p>
@@ -151,10 +156,10 @@ snapapi tests/ --listener examples/print_listener.py:PrintListener --report html
 
 results = run_suites(["tests/foo.sapi"])
 assert all(suite.ok for suite in results)</code></pre>
-      <p><code>run_suites</code> accepts the same options as <code>snapapi run</code> (tags, names, env file, timeout, workers, VCR mode, and the rest) as keyword arguments. It returns a list of suite results.</p>
+      <p><code>run_suites</code> accepts the same options as <code>snapapi run</code> (tags, names, env file, timeout, workers, VCR mode, <code>plugins=</code>, and the rest) as keyword arguments. It returns a list of suite results.</p>
       <div class="page-nav">
         <a href="dsl.html" rel="prev"><span>Previous</span><strong>DSL reference</strong></a>
-        <a href="ci.html" rel="next"><span>Next</span><strong>CI / reports</strong></a>
+        <a href="plugins.html" rel="next"><span>Next</span><strong>Plugins</strong></a>
       </div>
     </main>
   </div>

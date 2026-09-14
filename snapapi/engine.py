@@ -24,6 +24,7 @@ from snapapi.exceptions import JsonPathError, SnapAPIError, XPathError
 from snapapi.listeners import notify
 from snapapi.openapi import collect_parameters, load_spec, match_operation, request_body_schema, response_schema
 from snapapi.parser import walk_expect_checks
+from snapapi.plugins import build_registry
 from snapapi import jsonpath, xpath
 from snapapi.redact import redact_body, redact_headers, redact_saved
 from snapapi.safety import assert_public_url
@@ -225,12 +226,14 @@ class Engine:
         vcr_match=None,
         reruns=None,
         listeners=None,
+        plugins=None,
         verbosity=1,
         maxfail=None,
         color=None,
     ):
         self.suite = suite
         self.variables = dict(variables or {})
+        self.plugins = build_registry(suite.get("source"), plugins=plugins)
         self.env_file = env_file
         options = suite.get("options") or {}
         if timeout is not None:
@@ -291,6 +294,9 @@ class Engine:
         self.listeners = list(listeners or [])
         self._dep_status = {}
 
+    def _interp(self, value):
+        return interpolate(value, self.variables, plugins=self.plugins)
+
     def run(self):
         started = time.perf_counter()
         name = self.suite.get("name") or "suite"
@@ -299,7 +305,7 @@ class Engine:
             self._print(self._paint(self.suite["description"], Style.DIM))
         if self.verbosity >= 1 and self.env_file:
             self._print(self._paint(f"  env {self.env_file}", Style.DIM))
-        self._apply_sets(self.suite.get("sets"))
+        self._apply_preps(self.suite)
         self._notify("start_suite", self._suite_info())
 
         results = []
@@ -590,6 +596,8 @@ class Engine:
             contract_strict=self.contract_strict,
             vcr_match=self.vcr_match,
             reruns=self.reruns,
+            listeners=self.listeners,
+            plugins=self.plugins,
             verbosity=self.verbosity,
             color=self._color,
         )
@@ -614,7 +622,10 @@ class Engine:
 
         self._stack.append(name)
         try:
-            self._apply_sets(test.get("sets"))
+            try:
+                self._apply_preps(test)
+            except SnapAPIError as exc:
+                error = str(exc)
             if announce:
                 self._announce(test, role)
             if test.get("setup"):
@@ -670,7 +681,7 @@ class Engine:
             self._stack.pop()
 
     def _run_body(self, test):
-        base_url = interpolate(test.get("base_url") or self.suite.get("base_url") or "", self.variables)
+        base_url = self._interp(test.get("base_url") or self.suite.get("base_url") or "")
         follow = test.get("follow_redirects")
         if follow is None:
             follow = self.suite.get("follow_redirects")
@@ -699,24 +710,24 @@ class Engine:
         method = step["action"]
         handles = []
         try:
-            self._apply_sets(step.get("sets"))
-            endpoint = interpolate(step["endpoint"], self.variables)
-            query = interpolate(step.get("query") or {}, self.variables)
+            self._apply_preps(step)
+            endpoint = self._interp(step["endpoint"])
+            query = self._interp(step.get("query") or {})
             endpoint = merge_query(endpoint, query)
-            data = interpolate(step.get("data"), self.variables) if step.get("data") is not None else None
-            raw_body = interpolate(step.get("raw_body"), self.variables) if step.get("raw_body") is not None else None
+            data = self._interp(step.get("data")) if step.get("data") is not None else None
+            raw_body = self._interp(step.get("raw_body")) if step.get("raw_body") is not None else None
             headers = {}
             headers.update(test.get("headers") or {})
             headers.update(step.get("headers") or {})
-            headers = interpolate(headers, self.variables) if headers else {}
+            headers = self._interp(headers) if headers else {}
             if step.get("oauth2"):
                 headers["Authorization"] = f"Bearer {self._oauth_token(step['oauth2'])}"
             digest = step.get("digest") or test.get("digest") or self.suite.get("digest")
             auth = None
             if digest:
                 auth = HTTPDigestAuth(
-                    interpolate(digest.get("username") or "", self.variables),
-                    interpolate(digest.get("password") or "", self.variables),
+                    self._interp(digest.get("username") or ""),
+                    self._interp(digest.get("password") or ""),
                 )
             files, handles = open_files(step.get("files"), self._base_dir())
         except SnapAPIError as exc:
@@ -977,7 +988,7 @@ class Engine:
             detail = "; ".join(errors) if errors else "no alternatives"
             raise AssertionError(f"OR expected at least one check to pass: {detail}")
         if check_type == "STATUS":
-            expected = int(interpolate(str(check["value"]), self.variables))
+            expected = int(self._interp(str(check["value"])))
             actual = response.status_code
             operator = check.get("operator") or "=="
             if operator == "!=":
@@ -1011,18 +1022,18 @@ class Engine:
         if check.get("negated") and operator == "CONTAINS":
             operator = "NOT CONTAINS"
         if operator in ("CONTAINS", "NOT CONTAINS"):
-            expected = interpolate(str(check.get("value") or ""), self.variables)
+            expected = self._interp(str(check.get("value") or ""))
             present = expected in actual
             if operator == "NOT CONTAINS":
                 assert not present, f"Response unexpectedly contains {expected}"
             else:
                 assert present, f"Response does not contain {expected}"
             return
-        expected = interpolate(check.get("value"), self.variables)
+        expected = self._interp(check.get("value"))
         _assert_value(actual, operator, expected, "Response body")
 
     def _check_json(self, check, response):
-        path = interpolate(check["path"], self.variables)
+        path = self._interp(check["path"])
         try:
             body = response.json()
         except ValueError as exc:
@@ -1031,7 +1042,7 @@ class Engine:
             actual = jsonpath.extract(body, path)
         except JsonPathError as exc:
             raise AssertionError(str(exc)) from exc
-        expected = interpolate(check.get("value"), self.variables)
+        expected = self._interp(check.get("value"))
         operator = check["operator"]
         if operator.startswith("length "):
             cmp_op = operator.split(" ", 1)[1]
@@ -1052,7 +1063,7 @@ class Engine:
                 self._assert_json_value(item_value, sub_op, expected, f"JSON {path}[{index}] {subpath}")
             return
         if operator.upper() == "CLOSE-TO":
-            delta = interpolate(check.get("delta"), self.variables)
+            delta = self._interp(check.get("delta"))
             _assert_value(actual, "CLOSE-TO", expected, f"JSON {path}", delta=delta)
             return
         self._assert_json_value(actual, operator, expected, f"JSON {path}")
@@ -1061,12 +1072,12 @@ class Engine:
         _assert_value(actual, operator, expected, label)
 
     def _check_xpath(self, check, response):
-        path = interpolate(check["path"], self.variables)
+        path = self._interp(check["path"])
         try:
             actual = xpath.extract(_response_text(response), path)
         except XPathError as exc:
             raise AssertionError(str(exc)) from exc
-        expected = interpolate(check["value"], self.variables)
+        expected = self._interp(check["value"])
         operator = check.get("operator") or "=="
         if operator == "==":
             assert actual == expected, f"XPath {path} expected {expected!r}, got {actual!r}"
@@ -1078,7 +1089,7 @@ class Engine:
             raise AssertionError(f"Unknown XPath operator {operator}")
 
     def _check_header(self, check, response):
-        name = interpolate(check["name"], self.variables)
+        name = self._interp(check["name"])
         operator = _norm_operator(check["operator"])
         actual = response.headers.get(name)
         if operator in ("EMPTY", "NOT EMPTY"):
@@ -1087,7 +1098,7 @@ class Engine:
             return
         if actual is None:
             raise AssertionError(f"Header {name} missing")
-        expected = interpolate(check.get("value"), self.variables)
+        expected = self._interp(check.get("value"))
         if operator in ("==", "!="):
             if operator == "==":
                 assert actual == expected, f"Header {name} expected {expected!r}, got {actual!r}"
@@ -1108,7 +1119,7 @@ class Engine:
         if check.get("mode") == "inline":
             schema = check.get("schema")
         else:
-            path = Path(interpolate(check["path"], self.variables))
+            path = Path(self._interp(check["path"]))
             if not path.is_absolute():
                 path = Path(self._base_dir()) / path
             try:
@@ -1140,7 +1151,7 @@ class Engine:
 
     def _save_value(self, save, response):
         source = (save.get("source") or "json").lower()
-        selector = interpolate(save["path"], self.variables)
+        selector = self._interp(save["path"])
         if source == "header":
             value = response.headers.get(selector)
             if value is None:
@@ -1166,10 +1177,10 @@ class Engine:
         self._print(self._paint(f"{indent}saved {save['name']}={shown}", Style.DIM))
 
     def _oauth_token(self, spec, force_refresh=False):
-        token_url = interpolate(spec.get("token_url"), self.variables)
-        client_id = interpolate(spec.get("client_id"), self.variables)
-        secret = interpolate(spec.get("client_secret") or "", self.variables)
-        username = interpolate(spec.get("username") or "", self.variables)
+        token_url = self._interp(spec.get("token_url"))
+        client_id = self._interp(spec.get("client_id"))
+        secret = self._interp(spec.get("client_secret") or "")
+        username = self._interp(spec.get("username") or "")
         key = (token_url, client_id, username)
         cached = self._oauth_cache.get(key)
         if isinstance(cached, str):
@@ -1190,10 +1201,10 @@ class Engine:
                 "client_id": client_id,
                 "client_secret": secret,
                 "username": username,
-                "password": interpolate(spec.get("password") or "", self.variables),
+                "password": self._interp(spec.get("password") or ""),
             }
         elif grant in ("authorization_code", "authorization-code"):
-            code = interpolate(spec.get("code") or "", self.variables)
+            code = self._interp(spec.get("code") or "")
             if not code:
                 raise SnapAPIError(
                     "OAuth2 authorization_code requires code=${AUTH_CODE} "
@@ -1204,7 +1215,7 @@ class Engine:
                 "code": code,
                 "client_id": client_id,
                 "client_secret": secret,
-                "redirect_uri": interpolate(spec.get("redirect_uri") or "", self.variables),
+                "redirect_uri": self._interp(spec.get("redirect_uri") or ""),
             }
             if _as_bool(spec.get("pkce"), False):
                 verifier, challenge = _pkce_s256()
@@ -1240,22 +1251,58 @@ class Engine:
         return token
 
     def _oauth_can_refresh(self, spec):
-        token_url = interpolate(spec.get("token_url"), self.variables)
-        client_id = interpolate(spec.get("client_id"), self.variables)
-        username = interpolate(spec.get("username") or "", self.variables)
+        token_url = self._interp(spec.get("token_url"))
+        client_id = self._interp(spec.get("client_id"))
+        username = self._interp(spec.get("username") or "")
         cached = self._oauth_cache.get((token_url, client_id, username))
         if isinstance(cached, dict) and cached.get("refresh_token"):
             return True
         return False
 
+    def _apply_preps(self, owner):
+        items = (owner or {}).get("preps")
+        if items:
+            for item in items:
+                if item.get("kind") == "call":
+                    self._apply_call(item)
+                else:
+                    self.variables[item["name"]] = self._interp(item["value"])
+            return
+        self._apply_sets((owner or {}).get("sets"))
+
+    def _apply_call(self, item):
+        from snapapi.plugins import invoke_extension
+
+        args = [self._interp(arg) for arg in item.get("args") or []]
+        fn = self._resolve_extension(item["func"])
+        self.variables[item["name"]] = invoke_extension(fn, item["func"], args)
+
+    def _resolve_extension(self, name):
+        from snapapi.plugins import ExtensionRegistry
+
+        plugins = self.plugins
+        if isinstance(plugins, ExtensionRegistry):
+            return plugins.resolve(name)
+        if isinstance(plugins, dict) and name in plugins:
+            return plugins[name]
+        if isinstance(plugins, dict):
+            raise SnapAPIError(
+                f"Unknown extension {name}(). Put the function in extensions/ "
+                "or list it in snapapi.yaml, or pass --plugin."
+            )
+        raise SnapAPIError(
+            f"Unknown extension {name}(). Put the function in extensions/ "
+            "or list it in snapapi.yaml, or pass --plugin."
+        )
+
     def _apply_sets(self, sets):
         for item in sets or []:
-            self.variables[item["name"]] = interpolate(item["value"], self.variables)
+            self.variables[item["name"]] = self._interp(item["value"])
 
     def _load_openapi_spec(self, spec_path):
         if not spec_path:
             return None
-        path = Path(interpolate(str(spec_path), self.variables))
+        path = Path(self._interp(str(spec_path)))
         if not path.is_absolute():
             path = Path(self._base_dir()) / path
         return load_spec(path)

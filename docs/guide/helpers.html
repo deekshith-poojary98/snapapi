@@ -20,6 +20,7 @@
         <a href="../index.html">Home</a>
         <a href="install.html">Install</a>
         <a href="quick-start.html">Quick start</a>
+        <a href="not-for-you.html">When not</a>
       </nav>
       <div class="nav-label">Learn</div>
       <nav aria-label="Learn">
@@ -33,6 +34,7 @@
       <nav aria-label="Reference">
         <a href="dsl.html">DSL</a>
         <a href="cli.html">CLI</a>
+        <a href="plugins.html">Plugins</a>
         <a href="ci.html">CI</a>
         <a href="vscode.html">VS Code</a>
         <a href="troubleshooting.html">Troubleshooting</a>
@@ -79,6 +81,7 @@ snapapi helpers.sapi</code></pre>
 
       <h2>Don’t use TEST for setup</h2>
       <p>If you write <code>TEST: Create User</code> and then <code>SETUP: Create User</code> on another test, SnapAPI treats Create User as a helper and drops it from the count. Old suites still do that. New ones should use <code>HELPER:</code> for setup and <code>TEST:</code> for cases you want counted.</p>
+      <p><code>HELPER:</code> is a setup procedure. It is not <code>${uuid()}</code> or <a href="plugins.html"><code>CALL</code></a>.</p>
       <p>The playground understands <code>HELPER</code> / <code>SETUP</code> too. Paste the suite with <code>URL: mock://api</code> if you want to try it there.</p>
       <div class="page-nav">
         <a href="env.html" rel="prev"><span>Previous</span><strong>Env / AUTH</strong></a>

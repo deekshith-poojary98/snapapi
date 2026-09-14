@@ -37,6 +37,7 @@ const KNOWN_KEYWORDS = new Set([
     "QUARANTINE",
     "WAIT",
     "SET",
+    "CALL",
     ...HTTP_METHODS,
 ]);
 const JSON_VALUE_KEYWORDS = new Set(["OPTIONS", "DATA", "BODY", "HEADERS", "GRAPHQL"]);
@@ -85,6 +86,7 @@ const KEYWORD_COMPLETIONS = [
     { label: "SAVE", detail: "Store a JSONPath/header/cookie value as ${name}" },
     { label: "WAIT", detail: "Poll the request until a JSONPath matches" },
     { label: "SET", detail: "Assign a variable without HTTP" },
+    { label: "CALL", detail: "CALL: name = ns.function(${ARG}) from extensions/" },
 ];
 
 function jsonComplete(text) {

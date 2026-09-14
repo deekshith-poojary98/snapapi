@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
+  <title>CALL — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
+        <a href="../index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
+        <a href="cli.html">CLI</a>
+        <a class="active" href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
+        <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">Python stays out of the .sapi file.</p>
+    </aside>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
+      <p class="kicker">Tooling</p>
+      <h1>CALL</h1>
+      <p class="lede">When SnapAPI doesn’t know how to compute one value, assign it from a Python function. The <code>.sapi</code> file still reads as HTTP. It does not name Python files.</p>
+
+      <h2>Assignment, then HTTP</h2>
+      <pre><code class="language-snaptest">SET: PAYLOAD snapapi
+CALL: signature = crypto.generate_signature(${PAYLOAD}, ${HMAC_SECRET})
+TEST: Signed request
+  GET: /users
+  HEADER: X-Signature: ${signature}
+  EXPECT: status == 200</code></pre>
+      <p>Mental model: <code>CALL: variable = function(arguments)</code> → Python runs → return value → <code>${variable}</code>. There is no <code>IF</code>, <code>FOR</code>, or <code>TRY</code>.</p>
+
+      <h2>Where the function lives</h2>
+      <p>Put modules in <code>extensions/</code> next to the suite (or a parent folder). SnapAPI loads public functions automatically. Optional <code>snapapi.yaml</code> lists them:</p>
+      <pre><code class="language-yaml">extensions:
+  - extensions.crypto</code></pre>
+      <pre><code>extensions/
+└── crypto.py</code></pre>
+      <pre><code class="language-python">def generate_signature(payload, secret):
+    ...
+    return digest</code></pre>
+      <p>Arguments are explicit. Pass <code>${PAYLOAD}</code>, not a hidden SnapAPI context. In the repo: <code>examples/plugins/</code> (same hello mock as quick start).</p>
+      <pre><code class="language-bash">snapapi mock examples/hello/mock.json --port 8765
+snapapi examples/plugins/signed.sapi -D HMAC_SECRET=dev</code></pre>
+
+      <h2>Namespaces</h2>
+      <p>If two modules define the same function name, the bare name is an error. Qualify it:</p>
+      <pre><code class="language-snaptest">CALL: token = auth.generate_token()
+CALL: signature = crypto.generate_signature(${PAYLOAD}, ${HMAC_SECRET})</code></pre>
+      <p>Unique names can omit the module: <code>CALL: user = generate_user()</code>.</p>
+
+      <h2>Return values</h2>
+      <p>A string or number becomes <code>${signature}</code> as you’d expect. An object or array is kept structured, so this works:</p>
+      <pre><code class="language-snaptest">CALL: user = testdata.generate_user()
+POST: /users
+BODY: ${user}</code></pre>
+      <p>The function must not skip steps, issue HTTP, or catch EXPECT. If you need that, keep pytest. See <a href="not-for-you.html">When SnapAPI is not for you</a>.</p>
+      <p><code>--plugin path.py</code> still loads an extra module (repeatable). Prefer <code>extensions/</code> so the suite never mentions a path. Listeners wrap the run; they don’t compute this value. The playground can’t load Python — use the CLI.</p>
+      <div class="page-nav">
+        <a href="cli.html" rel="prev"><span>Previous</span><strong>CLI</strong></a>
+        <a href="ci.html" rel="next"><span>Next</span><strong>CI / reports</strong></a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

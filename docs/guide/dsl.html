@@ -20,6 +20,7 @@
         <a href="../index.html">Home</a>
         <a href="install.html">Install</a>
         <a href="quick-start.html">Quick start</a>
+        <a href="not-for-you.html">When not</a>
       </nav>
       <div class="nav-label">Learn</div>
       <nav aria-label="Learn">
@@ -33,6 +34,7 @@
       <nav aria-label="Reference">
         <a class="active" href="dsl.html">DSL</a>
         <a href="cli.html">CLI</a>
+        <a href="plugins.html">Plugins</a>
         <a href="ci.html">CI</a>
         <a href="vscode.html">VS Code</a>
         <a href="troubleshooting.html">Troubleshooting</a>
@@ -52,6 +54,7 @@
         <a href="#body">Bodies</a>
         <a href="#expect">Expect</a>
         <a href="#save">SAVE / SET</a>
+        <a href="#plugins">Plugins</a>
         <a href="#wait">WAIT</a>
         <a href="#legacy">Legacy</a>
       </nav>
@@ -82,6 +85,7 @@ IMPORT: shared.sapi</code></pre>
           <tr><td><code>HEADER</code> / <code>HEADERS</code></td><td>Default headers. Line form or JSON object.</td></tr>
           <tr><td><code>AUTH</code></td><td>Default auth for following requests.</td></tr>
           <tr><td><code>SET</code></td><td>Assign a value without HTTP, e.g. <code>SET: orderId ${uuid()}</code>.</td></tr>
+          <tr><td><code>CALL</code></td><td><code>CALL: signature = crypto.generate_signature(${PAYLOAD}, ${SECRET})</code>. Stores the return value. See <a href="plugins.html">CALL</a>.</td></tr>
           <tr><td><code>IMPORT</code></td><td>Pull tests from another <code>.sapi</code> file (path relative to the current file). Not in the playground.</td></tr>
           <tr><td><code>HELPER</code></td><td>Named procedure with the same request/EXPECT/SAVE body as a test, but it is <strong>not</strong> a test case. Use it from <code>SUITE-SETUP</code> / <code>SETUP</code> / <code>TEARDOWN</code>.</td></tr>
           <tr><td><code>SUITE-SETUP</code></td><td>Name of a <code>HELPER</code> (or a <code>TEST</code>) to run once before primaries. <code>SUITE-TEARDOWN</code> after.</td></tr>
@@ -109,6 +113,7 @@ Bob,bob@example.com
           <tr><td><code>EXAMPLES</code></td><td>Inline CSV (header + rows) or a <code>.csv</code> path. Each row becomes <code>Test [first-cell]</code> with those variables. Playground supports inline tables only.</td></tr>
           <tr><td><code>SKIP</code> / <code>ONLY</code> / <code>QUARANTINE</code></td><td>CLI filters. Not implemented in the playground (you get a clear error).</td></tr>
           <tr><td><code>SET</code></td><td>Test-scoped assignment, interpolated before steps.</td></tr>
+          <tr><td><code>CALL</code></td><td>Test-scoped <code>CALL: name = function(${ARG})</code>. Not in the playground.</td></tr>
         </tbody>
       </table>
 
@@ -200,8 +205,11 @@ EXPECT: xpath //Order/@id == "1"</code></pre>
       <pre><code class="language-snaptest">SAVE: userId FROM $.id
 SAVE: requestId FROM header X-Request-Id
 SET: orderId ${uuid()}</code></pre>
-      <p><code>${NAME}</code> expands in URLs, paths, headers, bodies, and expect values. Lookup order: process environment, then <code>--env</code> / auto-discovered suite env / <code>--profile</code>, then <code>SET</code> / <code>SAVE</code>. Helpers: <code>${uuid()}</code>, <code>${now()}</code>, <code>${random.int(min,max)}</code>. Undefined variables are errors.</p>
-      <p>The playground seeds <code>${TOKEN}</code> as <code>playground-token</code> so bearer samples run without an env file.</p>
+      <p><code>${NAME}</code> expands in URLs, paths, headers, bodies, and expect values. Lookup order: process environment, then <code>--env</code> / auto-discovered suite env / <code>--profile</code>, then <code>SET</code> / <code>SAVE</code> / <code>CALL</code>. Built-in functions: <code>${uuid()}</code>, <code>${now()}</code>, <code>${random.int(min,max)}</code>. Custom functions use <a href="plugins.html"><code>CALL</code></a>. Undefined variables are errors.</p>
+      <p>The playground seeds <code>${TOKEN}</code> as <code>playground-token</code> so bearer samples run without an env file. Plugins are CLI-only.</p>
+
+      <h2 id="plugins">Plugins</h2>
+      <p>A plugin is a Python function loaded from <code>extensions/</code> (or <code>snapapi.yaml</code> / <code>--plugin</code>). The suite calls it with <code>CALL: signature = crypto.generate_signature(${PAYLOAD}, ${SECRET})</code> and uses <code>${signature}</code>. Arguments are explicit. There is no <code>IF</code> / <code>FOR</code> / <code>WHILE</code> — see <a href="not-for-you.html">When SnapAPI is not for you</a>.</p>
 
       <h2 id="wait">WAIT and retries</h2>
       <pre><code class="language-snaptest">WAIT: json $.status == "ready" TIMEOUT 10s BACKOFF 0.5s

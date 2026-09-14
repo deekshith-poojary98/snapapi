@@ -26,6 +26,7 @@
     IMPORT: "IMPORT is not available in the playground. Paste the tests into this editor, or use the CLI.",
     SKIP: "SKIP is not available in the playground. Comment the test out, or use the CLI.",
     ONLY: "ONLY is not available in the playground. Delete the other tests, or use the CLI.",
+    CALL: "CALL is not available in the playground. Use the SnapAPI CLI with extensions/.",
     QUARANTINE: "QUARANTINE is not available in the playground. Use the SnapAPI CLI.",
   };
   var LINE_KEYWORD_RE = /^([A-Z][A-Z0-9_-]*):(.*)$/;

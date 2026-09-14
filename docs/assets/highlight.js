@@ -59,6 +59,7 @@
     "HEAD",
     "GET",
     "SET",
+    "CALL",
     "URL",
   ];
 
