@@ -211,17 +211,33 @@ EXPECT: status == 200 RETRY 5 ON 5xx BACKOFF 1s
 EXPECT: body contains userId
 EXPECT: body not contains stack
 EXPECT: json $.email matches ^.+@example\\.com$
+EXPECT: json $.email not matches @tempmail
 EXPECT: json $.items length == 3
+EXPECT: json $.items empty
+EXPECT: json $.items not empty
+EXPECT: json $.id type string
+EXPECT: json $.status in ["open","pending"]
+EXPECT: json $.email starts-with "ada@"
+EXPECT: json $.email ends-with "@example.com"
+EXPECT: json $.tags contains-all ["a","b"]
+EXPECT: json $.tags contains-only ["a","b"]
+EXPECT: json $.tags contains-any ["admin","owner"]
+EXPECT: json $.ids unique
+EXPECT: json $.count between 1 10
+EXPECT: json $.score close-to 0.33 delta 0.01
 EXPECT: json $.items[*].id contains 3
 EXPECT: json $.items[?(@.status=="open")].id contains 3
-EXPECT: json $.tags contains-all ["a","b"]
 EXPECT: json $.items each $.status == "active"
+EXPECT: json $.ok == true BECAUSE "login should succeed"
 EXPECT: status == 400 OR status == 401
 EXPECT: json $.success == false AND body contains error
 EXPECT: (status == 400 OR status == 401) AND json $.success == false
 EXPECT: schema ./schemas/user.json
 EXPECT: duration < 200ms
 EXPECT: header Content-Type contains json
+EXPECT: header Content-Type starts-with application
+EXPECT: body empty
+EXPECT: body starts-with {"ok"
 EXPECT: openapi ./openapi.yaml
 EXPECT: openapi ./openapi.yaml strict
 EXPECT: xpath //Order/@id == "1"
@@ -238,7 +254,7 @@ EXPECT: HEADER Content-Type CONTAINS json
 
 JSONPath is a small subset: `$.a.b`, `$.items.0.id`, `$.items[0].id`, `$.items[*].id`, and equality filters `$.items[?(@.status=="open")]` / `$.items[?(@.id==1)]`.
 
-`AND` / `OR` combine checks on one line (`AND` binds tighter than `OR`; parentheses group). Quote a value if it contains those words. Multiple `EXPECT` lines on the same request still all have to pass.
+`AND` / `OR` combine checks on one line (`AND` binds tighter than `OR`; parentheses group). Quote a value if it contains those words. Multiple `EXPECT` lines on the same request all run; if more than one fails, every failure is reported together. `BECAUSE "reason"` on an EXPECT line is prepended to that check's failure message.
 
 XPath uses stdlib `xml.etree` (descendant tags and `/@attr`). Axes, namespaces, and functions are not implemented.
 

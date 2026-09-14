@@ -810,8 +810,14 @@ class Engine:
                     self._print_request(method, endpoint, response.status_code, duration_ms)
                     if wait:
                         self._execute_check(wait["check"], response, duration_ms, method, url)
+                    failures = []
                     for check in checks:
-                        self._execute_check(check, response, duration_ms, method, url)
+                        try:
+                            self._execute_check(check, response, duration_ms, method, url)
+                        except AssertionError as exc:
+                            failures.append(str(exc).strip())
+                    if failures:
+                        raise AssertionError("\n".join(failures))
                     if self._openapi_spec is not None:
                         self._validate_openapi(
                             self._openapi_spec, method, url, response, strict=self.contract_strict
@@ -946,6 +952,15 @@ class Engine:
             self._cassettes[key]["key"] = key
 
     def _execute_check(self, check, response, duration_ms=0, method=None, url=None):
+        try:
+            self._run_check(check, response, duration_ms, method, url)
+        except AssertionError as exc:
+            reason = check.get("because")
+            if reason:
+                raise AssertionError(f"{reason}: {exc}") from None
+            raise
+
+    def _run_check(self, check, response, duration_ms=0, method=None, url=None):
         check_type = check["type"]
         if check_type == "AND":
             for term in check.get("terms") or []:
@@ -970,12 +985,7 @@ class Engine:
             else:
                 assert actual == expected, f"Status code expected {expected}, got {actual}"
         elif check_type == "CONTAINS":
-            expected = interpolate(str(check["value"]), self.variables)
-            present = expected in response.text
-            if check.get("negated"):
-                assert not present, f"Response unexpectedly contains {expected}"
-            else:
-                assert present, f"Response does not contain {expected}"
+            self._check_body(check, response)
         elif check_type == "JSON":
             self._check_json(check, response)
         elif check_type == "HEADER":
@@ -995,6 +1005,22 @@ class Engine:
         else:
             raise AssertionError(f"Unknown check type {check_type}")
 
+    def _check_body(self, check, response):
+        actual = response.text or ""
+        operator = _norm_operator(check.get("operator") or "CONTAINS")
+        if check.get("negated") and operator == "CONTAINS":
+            operator = "NOT CONTAINS"
+        if operator in ("CONTAINS", "NOT CONTAINS"):
+            expected = interpolate(str(check.get("value") or ""), self.variables)
+            present = expected in actual
+            if operator == "NOT CONTAINS":
+                assert not present, f"Response unexpectedly contains {expected}"
+            else:
+                assert present, f"Response does not contain {expected}"
+            return
+        expected = interpolate(check.get("value"), self.variables)
+        _assert_value(actual, operator, expected, "Response body")
+
     def _check_json(self, check, response):
         path = interpolate(check["path"], self.variables)
         try:
@@ -1005,7 +1031,7 @@ class Engine:
             actual = jsonpath.extract(body, path)
         except JsonPathError as exc:
             raise AssertionError(str(exc)) from exc
-        expected = interpolate(check["value"], self.variables)
+        expected = interpolate(check.get("value"), self.variables)
         operator = check["operator"]
         if operator.startswith("length "):
             cmp_op = operator.split(" ", 1)[1]
@@ -1025,30 +1051,14 @@ class Engine:
                     raise AssertionError(f"JSON {path}[{index}] {exc}") from exc
                 self._assert_json_value(item_value, sub_op, expected, f"JSON {path}[{index}] {subpath}")
             return
-        if operator.upper() == "CONTAINS-ALL":
-            if not isinstance(actual, (list, tuple, set)):
-                raise AssertionError(f"JSON {path} contains-all requires an array, got {actual!r}")
-            missing = [item for item in _as_list(expected) if item not in actual]
-            assert not missing, f"JSON {path} value {actual!r} does not contain all of {expected!r} (missing {missing!r})"
+        if operator.upper() == "CLOSE-TO":
+            delta = interpolate(check.get("delta"), self.variables)
+            _assert_value(actual, "CLOSE-TO", expected, f"JSON {path}", delta=delta)
             return
         self._assert_json_value(actual, operator, expected, f"JSON {path}")
 
     def _assert_json_value(self, actual, operator, expected, label):
-        if operator == "==":
-            assert actual == expected, f"{label} expected {expected!r}, got {actual!r}"
-        elif operator == "!=":
-            assert actual != expected, f"{label} expected not {expected!r}, got {actual!r}"
-        elif operator.upper() == "CONTAINS":
-            if isinstance(actual, (list, tuple, set)):
-                assert expected in actual, f"{label} value {actual!r} does not contain {expected!r}"
-            else:
-                assert str(expected) in str(actual), f"{label} value {actual!r} does not contain {expected!r}"
-        elif operator.upper() == "MATCHES":
-            assert re.search(str(expected), str(actual)), f"{label} value {actual!r} does not match {expected!r}"
-        elif operator in (">", ">=", "<", "<="):
-            self._compare(actual, operator, expected, label)
-        else:
-            raise AssertionError(f"Unknown JSON operator {operator}")
+        _assert_value(actual, operator, expected, label)
 
     def _check_xpath(self, check, response):
         path = interpolate(check["path"], self.variables)
@@ -1069,19 +1079,22 @@ class Engine:
 
     def _check_header(self, check, response):
         name = interpolate(check["name"], self.variables)
-        expected = interpolate(str(check["value"]), self.variables)
+        operator = _norm_operator(check["operator"])
         actual = response.headers.get(name)
+        if operator in ("EMPTY", "NOT EMPTY"):
+            actual = actual if actual is not None else ""
+            _assert_value(actual, operator, None, f"Header {name}")
+            return
         if actual is None:
             raise AssertionError(f"Header {name} missing")
-        operator = check["operator"]
-        if operator == "==":
-            assert actual == expected, f"Header {name} expected {expected!r}, got {actual!r}"
-        elif operator == "!=":
-            assert actual != expected, f"Header {name} expected not {expected!r}, got {actual!r}"
-        elif operator.upper() == "CONTAINS":
-            assert expected in actual, f"Header {name} value {actual!r} does not contain {expected!r}"
-        else:
-            raise AssertionError(f"Unknown HEADER operator {operator}")
+        expected = interpolate(check.get("value"), self.variables)
+        if operator in ("==", "!="):
+            if operator == "==":
+                assert actual == expected, f"Header {name} expected {expected!r}, got {actual!r}"
+            else:
+                assert actual != expected, f"Header {name} expected not {expected!r}, got {actual!r}"
+            return
+        _assert_value(actual, operator, expected, f"Header {name}")
 
     def _check_schema(self, check, response):
         try:
@@ -1585,7 +1598,10 @@ class Engine:
 
     def _print_error(self, error, under_request=True):
         extra = 2 if under_request else 1
-        self._print(f"{self._spaces(extra)}{self._paint(error, Fore.RED)}")
+        text = str(error)
+        lines = text.splitlines() or [text]
+        for line in lines:
+            self._print(f"{self._spaces(extra)}{self._paint(line, Fore.RED)}")
 
     def _print_dump(self, recorded):
         indent = self._spaces(2)
@@ -1662,6 +1678,138 @@ def _as_list(value):
     if isinstance(value, (list, tuple, set)):
         return list(value)
     return [value]
+
+
+def _norm_operator(operator):
+    return re.sub(r"\s+", " ", str(operator or "").strip().upper())
+
+
+def _is_empty(value):
+    if value is None:
+        return True
+    if isinstance(value, (str, bytes, list, tuple, dict, set)):
+        return len(value) == 0
+    return False
+
+
+def _json_type_name(value):
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, (list, tuple)):
+        return "array"
+    return type(value).__name__
+
+
+def _same_set(left, right):
+    left_items = list(left)
+    right_items = list(right)
+    return all(item in right_items for item in left_items) and all(item in left_items for item in right_items)
+
+
+def _assert_value(actual, operator, expected, label, delta=None):
+    op = _norm_operator(operator)
+    if op == "==":
+        assert actual == expected, f"{label} expected {expected!r}, got {actual!r}"
+    elif op == "!=":
+        assert actual != expected, f"{label} expected not {expected!r}, got {actual!r}"
+    elif op == "CONTAINS":
+        if isinstance(actual, (list, tuple, set)):
+            assert expected in actual, f"{label} value {actual!r} does not contain {expected!r}"
+        else:
+            assert str(expected) in str(actual), f"{label} value {actual!r} does not contain {expected!r}"
+    elif op == "NOT CONTAINS":
+        if isinstance(actual, (list, tuple, set)):
+            assert expected not in actual, f"{label} value {actual!r} unexpectedly contains {expected!r}"
+        else:
+            assert str(expected) not in str(actual), f"{label} value {actual!r} unexpectedly contains {expected!r}"
+    elif op == "MATCHES":
+        assert re.search(str(expected), str(actual)), f"{label} value {actual!r} does not match {expected!r}"
+    elif op == "NOT MATCHES":
+        assert not re.search(str(expected), str(actual)), f"{label} value {actual!r} unexpectedly matches {expected!r}"
+    elif op == "STARTS-WITH":
+        assert str(actual).startswith(str(expected)), f"{label} value {actual!r} does not start with {expected!r}"
+    elif op == "ENDS-WITH":
+        assert str(actual).endswith(str(expected)), f"{label} value {actual!r} does not end with {expected!r}"
+    elif op == "EMPTY":
+        assert _is_empty(actual), f"{label} expected empty, got {actual!r}"
+    elif op == "NOT EMPTY":
+        assert not _is_empty(actual), f"{label} is unexpectedly empty"
+    elif op == "UNIQUE":
+        if not isinstance(actual, (list, tuple)):
+            raise AssertionError(f"{label} unique requires an array, got {actual!r}")
+        seen = []
+        dupes = []
+        for item in actual:
+            if item in seen and item not in dupes:
+                dupes.append(item)
+            seen.append(item)
+        assert not dupes, f"{label} expected unique values, got duplicates {dupes!r} in {actual!r}"
+    elif op == "TYPE":
+        actual_type = _json_type_name(actual)
+        expected_type = str(expected).lower()
+        assert actual_type == expected_type, f"{label} expected type {expected_type}, got {actual_type} ({actual!r})"
+    elif op == "IN":
+        options = _as_list(expected)
+        assert actual in options, f"{label} value {actual!r} not in {expected!r}"
+    elif op == "CONTAINS-ALL":
+        if not isinstance(actual, (list, tuple, set)):
+            raise AssertionError(f"{label} contains-all requires an array, got {actual!r}")
+        missing = [item for item in _as_list(expected) if item not in actual]
+        assert not missing, f"{label} value {actual!r} does not contain all of {expected!r} (missing {missing!r})"
+    elif op == "CONTAINS-ONLY":
+        if not isinstance(actual, (list, tuple, set)):
+            raise AssertionError(f"{label} contains-only requires an array, got {actual!r}")
+        wanted = _as_list(expected)
+        assert _same_set(actual, wanted), f"{label} value {actual!r} is not the set {wanted!r}"
+    elif op == "CONTAINS-ANY":
+        wanted = _as_list(expected)
+        if isinstance(actual, (list, tuple, set)):
+            found = any(item in actual for item in wanted)
+        else:
+            found = any(str(item) in str(actual) for item in wanted)
+        assert found, f"{label} value {actual!r} does not contain any of {expected!r}"
+    elif op == "BETWEEN":
+        bounds = _as_list(expected)
+        if len(bounds) != 2:
+            raise AssertionError(f"{label} between requires two numbers, got {expected!r}")
+        try:
+            value = float(actual)
+            low = float(bounds[0])
+            high = float(bounds[1])
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} cannot compare {actual!r} between {bounds[0]!r} and {bounds[1]!r}") from exc
+        assert low <= value <= high, f"{label} expected between {low} and {high}, got {value}"
+    elif op == "CLOSE-TO":
+        try:
+            value = float(actual)
+            target = float(expected)
+            tolerance = float(delta)
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} cannot compare {actual!r} close-to {expected!r} delta {delta!r}") from exc
+        assert abs(value - target) <= tolerance, f"{label} expected {target} ± {tolerance}, got {value}"
+    elif op in (">", ">=", "<", "<="):
+        try:
+            left = float(actual)
+            right = float(expected)
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} cannot compare {actual!r} and {expected!r}") from exc
+        ok = {
+            ">": left > right,
+            ">=": left >= right,
+            "<": left < right,
+            "<=": left <= right,
+        }[op]
+        assert ok, f"{label} expected {op} {right}, got {left}"
+    else:
+        raise AssertionError(f"Unknown operator {operator}")
 
 
 def _pkce_s256():

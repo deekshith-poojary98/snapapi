@@ -864,6 +864,110 @@ TEST: A
         )
 
 
+def test_expect_new_json_operators_and_because():
+    suite = parse_dsl(
+        """
+SUITE: Demo
+TEST: Checks
+  GET: /x
+  EXPECT: json $.items empty
+  EXPECT: json $.items not empty
+  EXPECT: json $.id type string
+  EXPECT: json $.status in ["open","pending"]
+  EXPECT: json $.email starts-with "ada@"
+  EXPECT: json $.email ends-with "@example.com"
+  EXPECT: json $.tags contains-only ["a","b"]
+  EXPECT: json $.tags contains-any ["admin"]
+  EXPECT: json $.ids unique
+  EXPECT: json $.count between 1 10
+  EXPECT: json $.score close-to 0.33 delta 0.01
+  EXPECT: json $.score close-to 0.33 ± 0.01
+  EXPECT: json $.email not matches @tempmail
+  EXPECT: json $.ok == true BECAUSE "login should succeed"
+  EXPECT: json $.ok == true BECAUSE "retry me" RETRY 3
+  EXPECT: body empty
+  EXPECT: body starts-with hello
+  EXPECT: body not matches stack
+  EXPECT: header X-Trace empty
+  EXPECT: header Content-Type starts-with application
+  EXPECT: header X-Status in ["open","pending"]
+"""
+    )
+    checks = suite["tests"][0]["steps"][0]["checks"]
+    assert checks[0]["operator"] == "EMPTY"
+    assert checks[1]["operator"] == "NOT EMPTY"
+    assert checks[2]["operator"] == "TYPE"
+    assert checks[2]["value"] == "string"
+    assert checks[3]["operator"] == "IN"
+    assert checks[3]["value"] == ["open", "pending"]
+    assert checks[4]["operator"] == "STARTS-WITH"
+    assert checks[4]["value"] == "ada@"
+    assert checks[5]["operator"] == "ENDS-WITH"
+    assert checks[6]["operator"] == "CONTAINS-ONLY"
+    assert checks[7]["operator"] == "CONTAINS-ANY"
+    assert checks[8]["operator"] == "UNIQUE"
+    assert checks[9]["operator"] == "BETWEEN"
+    assert checks[9]["value"] == [1, 10]
+    assert checks[10]["operator"] == "CLOSE-TO"
+    assert checks[10]["value"] == 0.33
+    assert checks[10]["delta"] == 0.01
+    assert checks[11]["operator"] == "CLOSE-TO"
+    assert checks[11]["delta"] == 0.01
+    assert checks[12]["operator"] == "NOT MATCHES"
+    assert checks[13]["because"] == "login should succeed"
+    assert checks[14]["because"] == "retry me"
+    assert checks[14]["retry"] == 3
+    assert checks[15]["operator"] == "EMPTY"
+    assert checks[16]["operator"] == "STARTS-WITH"
+    assert checks[17]["operator"] == "NOT MATCHES"
+    assert checks[18]["operator"] == "EMPTY"
+    assert checks[19]["operator"] == "STARTS-WITH"
+    assert checks[20]["operator"] == "IN"
+    assert checks[20]["value"] == ["open", "pending"]
+
+
+def test_because_quoted_value_is_not_suffix():
+    suite = parse_dsl(
+        """
+SUITE: Demo
+TEST: A
+  GET: /x
+  EXPECT: body contains "failed BECAUSE timeout"
+"""
+    )
+    check = suite["tests"][0]["steps"][0]["checks"][0]
+    assert check["type"] == "CONTAINS"
+    assert check["value"] == "failed BECAUSE timeout"
+    assert "because" not in check
+
+
+def test_because_on_and_or_term():
+    suite = parse_dsl(
+        """
+SUITE: Demo
+TEST: A
+  GET: /x
+  EXPECT: json $.ok == true BECAUSE "login" AND json $.id type number
+"""
+    )
+    check = suite["tests"][0]["steps"][0]["checks"][0]
+    assert check["type"] == "AND"
+    assert check["terms"][0]["because"] == "login"
+    assert check["terms"][1]["operator"] == "TYPE"
+
+
+def test_json_type_unknown_is_parse_error():
+    with pytest.raises(ParseError, match="type must be string"):
+        parse_dsl(
+            """
+SUITE: Demo
+TEST: A
+  GET: /x
+  EXPECT: json $.id type banana
+"""
+        )
+
+
 def test_sample_suite_parses():
     from pathlib import Path
 

@@ -854,3 +854,138 @@ def test_recommended_syntax_file(http_server):
     assert "page=2" in list_req["query"]
     assert "sort=name" in list_req["query"]
     assert "/health" in paths
+
+
+def test_soft_collects_all_expect_failures(http_server):
+    http_server.on("GET", "/x", json={"ok": False, "email": "other@example.com"})
+    result, _, output = run_dsl(_suite(http_server, """
+TEST: Soft
+  GET: /x
+  EXPECT: status == 201
+  EXPECT: json $.ok == true
+  EXPECT: json $.email == "ada@example.com"
+"""))
+    assert not result.ok
+    error = result.tests[0].error or ""
+    assert "Status code expected 201, got 200" in error
+    assert "JSON $.ok expected True, got False" in error
+    assert "ada@example.com" in error
+    assert "Status code expected 201, got 200" in output
+    assert "JSON $.ok expected True, got False" in output
+
+
+def test_soft_collect_retries_until_last_attempt(http_server):
+    http_server.on("GET", "/flaky", json={"ok": True}, fail_times=2)
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Flaky
+  GET: /flaky
+  EXPECT: status == 200
+  EXPECT: json $.ok == true RETRY 5
+"""))
+    assert result.ok
+    assert len(http_server.requests) == 3
+
+
+def test_expect_new_json_operators(http_server):
+    http_server.on(
+        "GET",
+        "/payload",
+        json={
+            "ok": True,
+            "id": "abc",
+            "status": "open",
+            "email": "ada@example.com",
+            "items": [],
+            "tags": ["b", "a"],
+            "ids": [1, 2, 3],
+            "count": 5,
+            "score": 0.329,
+            "missing": None,
+        },
+        headers={"Content-Type": "application/json; charset=utf-8", "X-Status": "open"},
+    )
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Ops
+  GET: /payload
+  EXPECT: json $.items empty
+  EXPECT: json $.tags not empty
+  EXPECT: json $.id type string
+  EXPECT: json $.count type number
+  EXPECT: json $.ok type boolean
+  EXPECT: json $.items type array
+  EXPECT: json $ type object
+  EXPECT: json $.missing type null
+  EXPECT: json $.status in ["open","pending"]
+  EXPECT: json $.email starts-with "ada@"
+  EXPECT: json $.email ends-with "@example.com"
+  EXPECT: json $.tags contains-only ["a","b"]
+  EXPECT: json $.tags contains-any ["z","a"]
+  EXPECT: json $.ids unique
+  EXPECT: json $.count between 1 10
+  EXPECT: json $.score close-to 0.33 delta 0.01
+  EXPECT: json $.email not matches @tempmail
+  EXPECT: header Content-Type starts-with application
+  EXPECT: header X-Status in ["open","pending"]
+  EXPECT: body not empty
+"""))
+    assert result.ok
+
+
+def test_expect_new_json_operators_fail_with_expected_vs_actual(http_server):
+    http_server.on(
+        "GET",
+        "/payload",
+        json={"email": "bob@tempmail.test", "tags": ["a", "a"], "count": 50, "score": 1.0, "items": [1]},
+    )
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Ops fail
+  GET: /payload
+  EXPECT: json $.items empty
+  EXPECT: json $.email starts-with "ada@"
+  EXPECT: json $.tags unique
+  EXPECT: json $.count between 1 10
+  EXPECT: json $.score close-to 0.33 delta 0.01
+  EXPECT: json $.email not matches @tempmail
+"""))
+    assert not result.ok
+    error = result.tests[0].error or ""
+    assert "expected empty" in error
+    assert "does not start with" in error
+    assert "expected unique" in error
+    assert "expected between 1.0 and 10.0" in error or "expected between 1 and 10" in error
+    assert "±" in error
+    assert "unexpectedly matches" in error
+
+
+def test_because_prefixes_failure(http_server):
+    http_server.on("GET", "/login", json={"ok": False})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Login
+  GET: /login
+  EXPECT: json $.ok == true BECAUSE "login should succeed"
+"""))
+    assert not result.ok
+    error = result.tests[0].error or ""
+    assert error.startswith("login should succeed:")
+    assert "expected True, got False" in error
+
+
+def test_body_empty_and_starts_with(http_server):
+    http_server.on("GET", "/empty", text="", headers={"Content-Type": "text/plain"})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Empty
+  GET: /empty
+  EXPECT: body empty
+"""))
+    assert result.ok
+
+    http_server.on("GET", "/hello", text="hello world")
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Hello
+  GET: /hello
+  EXPECT: body starts-with hello
+  EXPECT: body ends-with world
+  EXPECT: body matches hell
+  EXPECT: body not matches stack
+"""))
+    assert result.ok
