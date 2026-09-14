@@ -1,5 +1,11 @@
 # SnapAPI
 
+[![PyPI version](https://badge.fury.io/py/snapapi.svg)](https://badge.fury.io/py/snapapi)
+[![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
+[![CI Tests](https://github.com/deekshith-poojary98/snapapi/actions/workflows/snapapi.yml/badge.svg)](https://github.com/deekshith-poojary98/snapapi/actions/workflows/snapapi.yml)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/deekshith-poojary98/snapapi)
+
+
 SnapAPI is a lightweight HTTP API testing framework with a small custom DSL.
 Write `.sapi` files, then run them from the CLI. The older `.snaptest` extension still works.
 
