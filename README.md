@@ -3,7 +3,7 @@
 SnapAPI is a lightweight HTTP API testing framework with a small custom DSL.
 Write `.sapi` files, then run them from the CLI. The older `.snaptest` extension still works.
 
-**[User guide](docs/index.html)** — install, DSL reference, CLI, CI, VS Code, and an in-browser **[playground](docs/playground.html)** (no Python required). Open `docs/index.html` in a browser; there is no build step.
+**[User guide](https://deekshith-poojary98.github.io/snapapi/)** — install, DSL reference, CLI, CI, VS Code, and an in-browser **[playground](https://deekshith-poojary98.github.io/snapapi/playground.html)**
 
 ## Features
 
