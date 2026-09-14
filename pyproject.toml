@@ -3,7 +3,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "snapapi"
+name = "pysnapapi"
 version = "0.3.0"
 description = "Lightweight DSL for HTTP API testing"
 readme = "README.md"
