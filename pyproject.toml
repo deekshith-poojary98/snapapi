@@ -9,7 +9,9 @@ description = "Lightweight DSL for HTTP API testing"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
-authors = [{ name = "Deekshith Poojary" }]
+authors = [
+    {name = "Deekshith Poojary", email = "deekshithpoojary355@gmail.com"}
+]
 dependencies = [
     "requests>=2.28.0",
     "colorama>=0.4.6",
@@ -36,7 +38,10 @@ snapapi = "snapapi.cli:entry"
 snapapi = "snapapi.pytest_plugin"
 
 [project.urls]
-Homepage = "https://github.com/Deekshith-07/snapapi"
+Homepage = "https://github.com/deekshith-poojary98/snapapi"
+Documentation = "https://github.com/deekshith-poojary98/snapapi#readme"
+Repository = "https://github.com/deekshith-poojary98/snapapi"
+Issues = "https://github.com/deekshith-poojary98/snapapi/issues"
 
 [tool.setuptools.packages.find]
 include = ["snapapi"]
@@ -44,4 +49,4 @@ include = ["snapapi"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
-addopts = "-q"
+addopts = "-q -p no:snapapi"

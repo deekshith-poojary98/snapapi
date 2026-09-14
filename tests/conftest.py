@@ -1,8 +1,8 @@
 import pytest
 
-pytest_plugins = ["snapapi.pytest_plugin"]
-
 from tests.http_server import MockHTTPServer
+
+pytest_plugins = ["snapapi.pytest_plugin"]
 
 
 @pytest.fixture
