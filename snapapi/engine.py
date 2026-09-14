@@ -20,10 +20,11 @@ from requests.auth import HTTPDigestAuth
 
 from snapapi.api_client import APIClient, open_files
 from snapapi.cassette import cassette_key, load_cassettes, parse_vcr_match, save_cassette
-from snapapi.exceptions import JsonPathError, SnapAPIError, XPathError
+from snapapi.exceptions import CallError, JsonPathError, SnapAPIError, XPathError
 from snapapi.listeners import notify
 from snapapi.openapi import collect_parameters, load_spec, match_operation, request_body_schema, response_schema
 from snapapi.parser import walk_expect_checks
+from snapapi.plugins import build_registry
 from snapapi import jsonpath, xpath
 from snapapi.redact import redact_body, redact_headers, redact_saved
 from snapapi.safety import assert_public_url
@@ -225,12 +226,14 @@ class Engine:
         vcr_match=None,
         reruns=None,
         listeners=None,
+        plugins=None,
         verbosity=1,
         maxfail=None,
         color=None,
     ):
         self.suite = suite
         self.variables = dict(variables or {})
+        self.plugins = build_registry(suite.get("source"), plugins=plugins)
         self.env_file = env_file
         options = suite.get("options") or {}
         if timeout is not None:
@@ -291,6 +294,9 @@ class Engine:
         self.listeners = list(listeners or [])
         self._dep_status = {}
 
+    def _interp(self, value):
+        return interpolate(value, self.variables, plugins=self.plugins)
+
     def run(self):
         started = time.perf_counter()
         name = self.suite.get("name") or "suite"
@@ -299,7 +305,21 @@ class Engine:
             self._print(self._paint(self.suite["description"], Style.DIM))
         if self.verbosity >= 1 and self.env_file:
             self._print(self._paint(f"  env {self.env_file}", Style.DIM))
-        self._apply_sets(self.suite.get("sets"))
+        try:
+            self._apply_preps(self.suite)
+        except SnapAPIError as exc:
+            self._print_error(str(exc), under_request=False)
+            label = "CALL" if isinstance(exc, CallError) else "SUITE"
+            suite_result = SuiteResult(
+                name=self.suite.get("name"),
+                source=self.suite.get("source"),
+                tests=[],
+                duration_ms=(time.perf_counter() - started) * 1000,
+                error=str(exc),
+                error_name=label,
+            )
+            self.print_summary(suite_result)
+            return suite_result
         self._notify("start_suite", self._suite_info())
 
         results = []
@@ -422,9 +442,12 @@ class Engine:
         if failed_rows:
             self._print(self._paint("  Failed:", Fore.RED))
             for test_name, error in failed_rows:
+                lines = (error or "failed").splitlines() or ["failed"]
                 self._print(
-                    f"    {self._paint('- ' + test_name + ':', Fore.RED)} {self._paint(error or 'failed', Fore.RED)}"
+                    f"    {self._paint('- ' + test_name + ':', Fore.RED)} {self._paint(lines[0], Fore.RED)}"
                 )
+                for extra in lines[1:]:
+                    self._print(f"      {self._paint(extra, Fore.RED)}")
         self._print()
 
     def _run_examples(self, test):
@@ -590,6 +613,8 @@ class Engine:
             contract_strict=self.contract_strict,
             vcr_match=self.vcr_match,
             reruns=self.reruns,
+            listeners=self.listeners,
+            plugins=self.plugins,
             verbosity=self.verbosity,
             color=self._color,
         )
@@ -614,10 +639,15 @@ class Engine:
 
         self._stack.append(name)
         try:
-            self._apply_sets(test.get("sets"))
+            try:
+                self._apply_preps(test)
+            except SnapAPIError as exc:
+                error = str(exc)
             if announce:
                 self._announce(test, role)
-            if test.get("setup"):
+            if error:
+                self._print_error(error, under_request=False)
+            if error is None and test.get("setup"):
                 setup_result = self._run_test(test["setup"], role="setup")
                 collected.extend(setup_result.requests)
                 if setup_result.status == "failed":
@@ -670,7 +700,7 @@ class Engine:
             self._stack.pop()
 
     def _run_body(self, test):
-        base_url = interpolate(test.get("base_url") or self.suite.get("base_url") or "", self.variables)
+        base_url = self._interp(test.get("base_url") or self.suite.get("base_url") or "")
         follow = test.get("follow_redirects")
         if follow is None:
             follow = self.suite.get("follow_redirects")
@@ -699,24 +729,24 @@ class Engine:
         method = step["action"]
         handles = []
         try:
-            self._apply_sets(step.get("sets"))
-            endpoint = interpolate(step["endpoint"], self.variables)
-            query = interpolate(step.get("query") or {}, self.variables)
+            self._apply_preps(step)
+            endpoint = self._interp(step["endpoint"])
+            query = self._interp(step.get("query") or {})
             endpoint = merge_query(endpoint, query)
-            data = interpolate(step.get("data"), self.variables) if step.get("data") is not None else None
-            raw_body = interpolate(step.get("raw_body"), self.variables) if step.get("raw_body") is not None else None
+            data = self._interp(step.get("data")) if step.get("data") is not None else None
+            raw_body = self._interp(step.get("raw_body")) if step.get("raw_body") is not None else None
             headers = {}
             headers.update(test.get("headers") or {})
             headers.update(step.get("headers") or {})
-            headers = interpolate(headers, self.variables) if headers else {}
+            headers = self._interp(headers) if headers else {}
             if step.get("oauth2"):
                 headers["Authorization"] = f"Bearer {self._oauth_token(step['oauth2'])}"
             digest = step.get("digest") or test.get("digest") or self.suite.get("digest")
             auth = None
             if digest:
                 auth = HTTPDigestAuth(
-                    interpolate(digest.get("username") or "", self.variables),
-                    interpolate(digest.get("password") or "", self.variables),
+                    self._interp(digest.get("username") or ""),
+                    self._interp(digest.get("password") or ""),
                 )
             files, handles = open_files(step.get("files"), self._base_dir())
         except SnapAPIError as exc:
@@ -810,8 +840,14 @@ class Engine:
                     self._print_request(method, endpoint, response.status_code, duration_ms)
                     if wait:
                         self._execute_check(wait["check"], response, duration_ms, method, url)
+                    failures = []
                     for check in checks:
-                        self._execute_check(check, response, duration_ms, method, url)
+                        try:
+                            self._execute_check(check, response, duration_ms, method, url)
+                        except AssertionError as exc:
+                            failures.append(str(exc).strip())
+                    if failures:
+                        raise AssertionError("\n".join(failures))
                     if self._openapi_spec is not None:
                         self._validate_openapi(
                             self._openapi_spec, method, url, response, strict=self.contract_strict
@@ -946,6 +982,15 @@ class Engine:
             self._cassettes[key]["key"] = key
 
     def _execute_check(self, check, response, duration_ms=0, method=None, url=None):
+        try:
+            self._run_check(check, response, duration_ms, method, url)
+        except AssertionError as exc:
+            reason = check.get("because")
+            if reason:
+                raise AssertionError(f"{reason}: {exc}") from None
+            raise
+
+    def _run_check(self, check, response, duration_ms=0, method=None, url=None):
         check_type = check["type"]
         if check_type == "AND":
             for term in check.get("terms") or []:
@@ -962,7 +1007,7 @@ class Engine:
             detail = "; ".join(errors) if errors else "no alternatives"
             raise AssertionError(f"OR expected at least one check to pass: {detail}")
         if check_type == "STATUS":
-            expected = int(interpolate(str(check["value"]), self.variables))
+            expected = int(self._interp(str(check["value"])))
             actual = response.status_code
             operator = check.get("operator") or "=="
             if operator == "!=":
@@ -970,12 +1015,7 @@ class Engine:
             else:
                 assert actual == expected, f"Status code expected {expected}, got {actual}"
         elif check_type == "CONTAINS":
-            expected = interpolate(str(check["value"]), self.variables)
-            present = expected in response.text
-            if check.get("negated"):
-                assert not present, f"Response unexpectedly contains {expected}"
-            else:
-                assert present, f"Response does not contain {expected}"
+            self._check_body(check, response)
         elif check_type == "JSON":
             self._check_json(check, response)
         elif check_type == "HEADER":
@@ -995,8 +1035,24 @@ class Engine:
         else:
             raise AssertionError(f"Unknown check type {check_type}")
 
+    def _check_body(self, check, response):
+        actual = response.text or ""
+        operator = _norm_operator(check.get("operator") or "CONTAINS")
+        if check.get("negated") and operator == "CONTAINS":
+            operator = "NOT CONTAINS"
+        if operator in ("CONTAINS", "NOT CONTAINS"):
+            expected = self._interp(str(check.get("value") or ""))
+            present = expected in actual
+            if operator == "NOT CONTAINS":
+                assert not present, f"Response unexpectedly contains {expected}"
+            else:
+                assert present, f"Response does not contain {expected}"
+            return
+        expected = self._interp(check.get("value"))
+        _assert_value(actual, operator, expected, "Response body")
+
     def _check_json(self, check, response):
-        path = interpolate(check["path"], self.variables)
+        path = self._interp(check["path"])
         try:
             body = response.json()
         except ValueError as exc:
@@ -1005,7 +1061,7 @@ class Engine:
             actual = jsonpath.extract(body, path)
         except JsonPathError as exc:
             raise AssertionError(str(exc)) from exc
-        expected = interpolate(check["value"], self.variables)
+        expected = self._interp(check.get("value"))
         operator = check["operator"]
         if operator.startswith("length "):
             cmp_op = operator.split(" ", 1)[1]
@@ -1025,38 +1081,22 @@ class Engine:
                     raise AssertionError(f"JSON {path}[{index}] {exc}") from exc
                 self._assert_json_value(item_value, sub_op, expected, f"JSON {path}[{index}] {subpath}")
             return
-        if operator.upper() == "CONTAINS-ALL":
-            if not isinstance(actual, (list, tuple, set)):
-                raise AssertionError(f"JSON {path} contains-all requires an array, got {actual!r}")
-            missing = [item for item in _as_list(expected) if item not in actual]
-            assert not missing, f"JSON {path} value {actual!r} does not contain all of {expected!r} (missing {missing!r})"
+        if operator.upper() == "CLOSE-TO":
+            delta = self._interp(check.get("delta"))
+            _assert_value(actual, "CLOSE-TO", expected, f"JSON {path}", delta=delta)
             return
         self._assert_json_value(actual, operator, expected, f"JSON {path}")
 
     def _assert_json_value(self, actual, operator, expected, label):
-        if operator == "==":
-            assert actual == expected, f"{label} expected {expected!r}, got {actual!r}"
-        elif operator == "!=":
-            assert actual != expected, f"{label} expected not {expected!r}, got {actual!r}"
-        elif operator.upper() == "CONTAINS":
-            if isinstance(actual, (list, tuple, set)):
-                assert expected in actual, f"{label} value {actual!r} does not contain {expected!r}"
-            else:
-                assert str(expected) in str(actual), f"{label} value {actual!r} does not contain {expected!r}"
-        elif operator.upper() == "MATCHES":
-            assert re.search(str(expected), str(actual)), f"{label} value {actual!r} does not match {expected!r}"
-        elif operator in (">", ">=", "<", "<="):
-            self._compare(actual, operator, expected, label)
-        else:
-            raise AssertionError(f"Unknown JSON operator {operator}")
+        _assert_value(actual, operator, expected, label)
 
     def _check_xpath(self, check, response):
-        path = interpolate(check["path"], self.variables)
+        path = self._interp(check["path"])
         try:
             actual = xpath.extract(_response_text(response), path)
         except XPathError as exc:
             raise AssertionError(str(exc)) from exc
-        expected = interpolate(check["value"], self.variables)
+        expected = self._interp(check["value"])
         operator = check.get("operator") or "=="
         if operator == "==":
             assert actual == expected, f"XPath {path} expected {expected!r}, got {actual!r}"
@@ -1068,20 +1108,23 @@ class Engine:
             raise AssertionError(f"Unknown XPath operator {operator}")
 
     def _check_header(self, check, response):
-        name = interpolate(check["name"], self.variables)
-        expected = interpolate(str(check["value"]), self.variables)
+        name = self._interp(check["name"])
+        operator = _norm_operator(check["operator"])
         actual = response.headers.get(name)
+        if operator in ("EMPTY", "NOT EMPTY"):
+            actual = actual if actual is not None else ""
+            _assert_value(actual, operator, None, f"Header {name}")
+            return
         if actual is None:
             raise AssertionError(f"Header {name} missing")
-        operator = check["operator"]
-        if operator == "==":
-            assert actual == expected, f"Header {name} expected {expected!r}, got {actual!r}"
-        elif operator == "!=":
-            assert actual != expected, f"Header {name} expected not {expected!r}, got {actual!r}"
-        elif operator.upper() == "CONTAINS":
-            assert expected in actual, f"Header {name} value {actual!r} does not contain {expected!r}"
-        else:
-            raise AssertionError(f"Unknown HEADER operator {operator}")
+        expected = self._interp(check.get("value"))
+        if operator in ("==", "!="):
+            if operator == "==":
+                assert actual == expected, f"Header {name} expected {expected!r}, got {actual!r}"
+            else:
+                assert actual != expected, f"Header {name} expected not {expected!r}, got {actual!r}"
+            return
+        _assert_value(actual, operator, expected, f"Header {name}")
 
     def _check_schema(self, check, response):
         try:
@@ -1095,7 +1138,7 @@ class Engine:
         if check.get("mode") == "inline":
             schema = check.get("schema")
         else:
-            path = Path(interpolate(check["path"], self.variables))
+            path = Path(self._interp(check["path"]))
             if not path.is_absolute():
                 path = Path(self._base_dir()) / path
             try:
@@ -1127,7 +1170,7 @@ class Engine:
 
     def _save_value(self, save, response):
         source = (save.get("source") or "json").lower()
-        selector = interpolate(save["path"], self.variables)
+        selector = self._interp(save["path"])
         if source == "header":
             value = response.headers.get(selector)
             if value is None:
@@ -1153,10 +1196,10 @@ class Engine:
         self._print(self._paint(f"{indent}saved {save['name']}={shown}", Style.DIM))
 
     def _oauth_token(self, spec, force_refresh=False):
-        token_url = interpolate(spec.get("token_url"), self.variables)
-        client_id = interpolate(spec.get("client_id"), self.variables)
-        secret = interpolate(spec.get("client_secret") or "", self.variables)
-        username = interpolate(spec.get("username") or "", self.variables)
+        token_url = self._interp(spec.get("token_url"))
+        client_id = self._interp(spec.get("client_id"))
+        secret = self._interp(spec.get("client_secret") or "")
+        username = self._interp(spec.get("username") or "")
         key = (token_url, client_id, username)
         cached = self._oauth_cache.get(key)
         if isinstance(cached, str):
@@ -1177,10 +1220,10 @@ class Engine:
                 "client_id": client_id,
                 "client_secret": secret,
                 "username": username,
-                "password": interpolate(spec.get("password") or "", self.variables),
+                "password": self._interp(spec.get("password") or ""),
             }
         elif grant in ("authorization_code", "authorization-code"):
-            code = interpolate(spec.get("code") or "", self.variables)
+            code = self._interp(spec.get("code") or "")
             if not code:
                 raise SnapAPIError(
                     "OAuth2 authorization_code requires code=${AUTH_CODE} "
@@ -1191,7 +1234,7 @@ class Engine:
                 "code": code,
                 "client_id": client_id,
                 "client_secret": secret,
-                "redirect_uri": interpolate(spec.get("redirect_uri") or "", self.variables),
+                "redirect_uri": self._interp(spec.get("redirect_uri") or ""),
             }
             if _as_bool(spec.get("pkce"), False):
                 verifier, challenge = _pkce_s256()
@@ -1227,22 +1270,59 @@ class Engine:
         return token
 
     def _oauth_can_refresh(self, spec):
-        token_url = interpolate(spec.get("token_url"), self.variables)
-        client_id = interpolate(spec.get("client_id"), self.variables)
-        username = interpolate(spec.get("username") or "", self.variables)
+        token_url = self._interp(spec.get("token_url"))
+        client_id = self._interp(spec.get("client_id"))
+        username = self._interp(spec.get("username") or "")
         cached = self._oauth_cache.get((token_url, client_id, username))
         if isinstance(cached, dict) and cached.get("refresh_token"):
             return True
         return False
 
+    def _apply_preps(self, owner):
+        items = (owner or {}).get("preps")
+        if items:
+            for item in items:
+                if item.get("kind") == "call":
+                    self._apply_call(item)
+                else:
+                    self.variables[item["name"]] = self._interp(item["value"])
+            return
+        self._apply_sets((owner or {}).get("sets"))
+
+    def _apply_call(self, item):
+        from snapapi.plugins import invoke_extension
+
+        args = [self._interp(arg) for arg in item.get("args") or []]
+        fn = self._resolve_extension(item["func"])
+        test = self._stack[-1] if self._stack else None
+        self.variables[item["name"]] = invoke_extension(fn, item["func"], args, test=test)
+
+    def _resolve_extension(self, name):
+        from snapapi.plugins import ExtensionRegistry
+
+        plugins = self.plugins
+        if isinstance(plugins, ExtensionRegistry):
+            return plugins.resolve(name)
+        if isinstance(plugins, dict) and name in plugins:
+            return plugins[name]
+        if isinstance(plugins, dict):
+            raise SnapAPIError(
+                f"Unknown extension {name}(). Put the function in extensions/ "
+                "or list it in snapapi.yaml, or pass --plugin."
+            )
+        raise SnapAPIError(
+            f"Unknown extension {name}(). Put the function in extensions/ "
+            "or list it in snapapi.yaml, or pass --plugin."
+        )
+
     def _apply_sets(self, sets):
         for item in sets or []:
-            self.variables[item["name"]] = interpolate(item["value"], self.variables)
+            self.variables[item["name"]] = self._interp(item["value"])
 
     def _load_openapi_spec(self, spec_path):
         if not spec_path:
             return None
-        path = Path(interpolate(str(spec_path), self.variables))
+        path = Path(self._interp(str(spec_path)))
         if not path.is_absolute():
             path = Path(self._base_dir()) / path
         return load_spec(path)
@@ -1585,7 +1665,10 @@ class Engine:
 
     def _print_error(self, error, under_request=True):
         extra = 2 if under_request else 1
-        self._print(f"{self._spaces(extra)}{self._paint(error, Fore.RED)}")
+        text = str(error)
+        lines = text.splitlines() or [text]
+        for line in lines:
+            self._print(f"{self._spaces(extra)}{self._paint(line, Fore.RED)}")
 
     def _print_dump(self, recorded):
         indent = self._spaces(2)
@@ -1662,6 +1745,138 @@ def _as_list(value):
     if isinstance(value, (list, tuple, set)):
         return list(value)
     return [value]
+
+
+def _norm_operator(operator):
+    return re.sub(r"\s+", " ", str(operator or "").strip().upper())
+
+
+def _is_empty(value):
+    if value is None:
+        return True
+    if isinstance(value, (str, bytes, list, tuple, dict, set)):
+        return len(value) == 0
+    return False
+
+
+def _json_type_name(value):
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, (list, tuple)):
+        return "array"
+    return type(value).__name__
+
+
+def _same_set(left, right):
+    left_items = list(left)
+    right_items = list(right)
+    return all(item in right_items for item in left_items) and all(item in left_items for item in right_items)
+
+
+def _assert_value(actual, operator, expected, label, delta=None):
+    op = _norm_operator(operator)
+    if op == "==":
+        assert actual == expected, f"{label} expected {expected!r}, got {actual!r}"
+    elif op == "!=":
+        assert actual != expected, f"{label} expected not {expected!r}, got {actual!r}"
+    elif op == "CONTAINS":
+        if isinstance(actual, (list, tuple, set)):
+            assert expected in actual, f"{label} value {actual!r} does not contain {expected!r}"
+        else:
+            assert str(expected) in str(actual), f"{label} value {actual!r} does not contain {expected!r}"
+    elif op == "NOT CONTAINS":
+        if isinstance(actual, (list, tuple, set)):
+            assert expected not in actual, f"{label} value {actual!r} unexpectedly contains {expected!r}"
+        else:
+            assert str(expected) not in str(actual), f"{label} value {actual!r} unexpectedly contains {expected!r}"
+    elif op == "MATCHES":
+        assert re.search(str(expected), str(actual)), f"{label} value {actual!r} does not match {expected!r}"
+    elif op == "NOT MATCHES":
+        assert not re.search(str(expected), str(actual)), f"{label} value {actual!r} unexpectedly matches {expected!r}"
+    elif op == "STARTS-WITH":
+        assert str(actual).startswith(str(expected)), f"{label} value {actual!r} does not start with {expected!r}"
+    elif op == "ENDS-WITH":
+        assert str(actual).endswith(str(expected)), f"{label} value {actual!r} does not end with {expected!r}"
+    elif op == "EMPTY":
+        assert _is_empty(actual), f"{label} expected empty, got {actual!r}"
+    elif op == "NOT EMPTY":
+        assert not _is_empty(actual), f"{label} is unexpectedly empty"
+    elif op == "UNIQUE":
+        if not isinstance(actual, (list, tuple)):
+            raise AssertionError(f"{label} unique requires an array, got {actual!r}")
+        seen = []
+        dupes = []
+        for item in actual:
+            if item in seen and item not in dupes:
+                dupes.append(item)
+            seen.append(item)
+        assert not dupes, f"{label} expected unique values, got duplicates {dupes!r} in {actual!r}"
+    elif op == "TYPE":
+        actual_type = _json_type_name(actual)
+        expected_type = str(expected).lower()
+        assert actual_type == expected_type, f"{label} expected type {expected_type}, got {actual_type} ({actual!r})"
+    elif op == "IN":
+        options = _as_list(expected)
+        assert actual in options, f"{label} value {actual!r} not in {expected!r}"
+    elif op == "CONTAINS-ALL":
+        if not isinstance(actual, (list, tuple, set)):
+            raise AssertionError(f"{label} contains-all requires an array, got {actual!r}")
+        missing = [item for item in _as_list(expected) if item not in actual]
+        assert not missing, f"{label} value {actual!r} does not contain all of {expected!r} (missing {missing!r})"
+    elif op == "CONTAINS-ONLY":
+        if not isinstance(actual, (list, tuple, set)):
+            raise AssertionError(f"{label} contains-only requires an array, got {actual!r}")
+        wanted = _as_list(expected)
+        assert _same_set(actual, wanted), f"{label} value {actual!r} is not the set {wanted!r}"
+    elif op == "CONTAINS-ANY":
+        wanted = _as_list(expected)
+        if isinstance(actual, (list, tuple, set)):
+            found = any(item in actual for item in wanted)
+        else:
+            found = any(str(item) in str(actual) for item in wanted)
+        assert found, f"{label} value {actual!r} does not contain any of {expected!r}"
+    elif op == "BETWEEN":
+        bounds = _as_list(expected)
+        if len(bounds) != 2:
+            raise AssertionError(f"{label} between requires two numbers, got {expected!r}")
+        try:
+            value = float(actual)
+            low = float(bounds[0])
+            high = float(bounds[1])
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} cannot compare {actual!r} between {bounds[0]!r} and {bounds[1]!r}") from exc
+        assert low <= value <= high, f"{label} expected between {low} and {high}, got {value}"
+    elif op == "CLOSE-TO":
+        try:
+            value = float(actual)
+            target = float(expected)
+            tolerance = float(delta)
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} cannot compare {actual!r} close-to {expected!r} delta {delta!r}") from exc
+        assert abs(value - target) <= tolerance, f"{label} expected {target} ± {tolerance}, got {value}"
+    elif op in (">", ">=", "<", "<="):
+        try:
+            left = float(actual)
+            right = float(expected)
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} cannot compare {actual!r} and {expected!r}") from exc
+        ok = {
+            ">": left > right,
+            ">=": left >= right,
+            "<": left < right,
+            "<=": left <= right,
+        }[op]
+        assert ok, f"{label} expected {op} {right}, got {left}"
+    else:
+        raise AssertionError(f"Unknown operator {operator}")
 
 
 def _pkce_s256():

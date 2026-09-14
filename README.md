@@ -1,15 +1,72 @@
 # SnapAPI
 
-[![PyPI version](https://badge.fury.io/py/snapapi.svg)](https://badge.fury.io/py/snapapi)
+[![PyPI version](https://badge.fury.io/py/pysnapapi.svg)](https://pypi.org/project/pysnapapi/)
 [![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![CI Tests](https://github.com/deekshith-poojary98/snapapi/actions/workflows/snapapi.yml/badge.svg)](https://github.com/deekshith-poojary98/snapapi/actions/workflows/snapapi.yml)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/deekshith-poojary98/snapapi)
 
 
-SnapAPI is a lightweight HTTP API testing framework with a small custom DSL.
-Write `.sapi` files, then run them from the CLI. The older `.snaptest` extension still works.
+SnapAPI is a small language for HTTP tests. Write a `.sapi` file, run `snapapi`, get PASS or FAIL.
 
-**[User guide](https://deekshith-poojary98.github.io/snapapi/)** — install, DSL reference, CLI, CI, VS Code, and an in-browser **[playground](https://deekshith-poojary98.github.io/snapapi/playground.html)**
+It is not a replacement for every API framework. If your tests are mostly **request → assert → extract → request → assert**, that's the 80% SnapAPI is for. Loops, custom crypto inside the suite, WebSockets, gRPC, or importing 2,000 existing cases: keep the tool you have. Need more power? [`CALL`](https://deekshith-poojary98.github.io/snapapi/guide/plugins.html) a Python extension and bring the result back — don't grow the test language. There is no `IF` / `FOR` / `WHILE` in the file — [when SnapAPI is not for you](https://deekshith-poojary98.github.io/snapapi/guide/not-for-you.html).
+
+**Start here:** [playground](https://deekshith-poojary98.github.io/snapapi/playground.html) (no install) → [quick start](https://deekshith-poojary98.github.io/snapapi/guide/quick-start.html) (same GET on the CLI).
+
+The PyPI package is **`pysnapapi`**. The command is **`snapapi`**. `pip install snapapi` is a different project.
+
+## First PASS
+
+You need something that answers `GET /users`. `snapapi mock` is a tiny server for that — local, not the public internet.
+
+Create `mock.json`:
+
+```json
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/users",
+      "status": 200,
+      "json": { "data": [{ "id": 1, "name": "Ada" }] }
+    }
+  ]
+}
+```
+
+Create `hello.sapi`:
+
+```
+SUITE: Hello API
+URL: http://127.0.0.1:8765
+
+TEST: Get Users
+  GET: /users
+  EXPECT: status == 200
+```
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install pysnapapi
+snapapi --version
+
+snapapi mock mock.json --port 8765   # leave running
+snapapi hello.sapi
+```
+
+You want `1 passed  0 failed`. Same files in the repo: `examples/hello/mock.json` and `examples/hello/hello.sapi`.
+
+## After first PASS
+
+Guide pages, in order:
+
+1. [POST + BODY](https://deekshith-poojary98.github.io/snapapi/guide/post.html)
+2. [SAVE](https://deekshith-poojary98.github.io/snapapi/guide/save.html) an id, then `${userId}`
+3. [Env / AUTH](https://deekshith-poojary98.github.io/snapapi/guide/env.html)
+4. [HELPER / SETUP](https://deekshith-poojary98.github.io/snapapi/guide/helpers.html)
+5. [Your API](https://deekshith-poojary98.github.io/snapapi/guide/your-api.html) — put your real origin in `URL:`
+
+[When SnapAPI is not for you](https://deekshith-poojary98.github.io/snapapi/guide/not-for-you.html) · [CALL](https://deekshith-poojary98.github.io/snapapi/guide/plugins.html) (`extensions/`) · [Troubleshooting](https://deekshith-poojary98.github.io/snapapi/guide/troubleshooting.html) if you’re stuck. Flag tables below are reference.
 
 ## Features
 
@@ -21,6 +78,7 @@ Write `.sapi` files, then run them from the CLI. The older `.snaptest` extension
 - Env files, tag filters, timeouts, retries, JSON and JUnit reports
 - OpenAPI response/request contract checks, VCR cassettes, JSON mock server
 - pytest plugin (`snapapi_run` / `@pytest.mark.snapapi`)
+- Python `CALL` / `extensions/` for values the HTTP DSL will not grow keywords for
 - VS Code syntax highlighting and diagnostics for `.sapi` files
 
 ## Requirements
@@ -29,8 +87,19 @@ Write `.sapi` files, then run them from the CLI. The older `.snaptest` extension
 
 ## Installation
 
+From PyPI (most people):
+
 ```bash
-git clone https://github.com/Deekshith-07/snapapi.git
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install pysnapapi
+snapapi --version
+```
+
+From this repository (contributors):
+
+```bash
+git clone https://github.com/deekshith-poojary98/snapapi.git
 cd snapapi
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
@@ -46,6 +115,8 @@ pip install -e .
 
 ## CLI
 
+After a green hello. You don’t need this table to get a first PASS.
+
 ```bash
 snapapi path/to/file.sapi
 python -m snapapi path/to/file.sapi
@@ -54,8 +125,9 @@ python -m snapapi path/to/file.sapi
 Pass multiple files or a directory of `.sapi` files:
 
 ```bash
-snapapi tests/test_suite.snaptest
-snapapi tests/ suites/auth.sapi
+snapapi examples/hello/hello.sapi
+snapapi examples/users/post.sapi
+snapapi tests/
 ```
 
 Options:
@@ -89,6 +161,7 @@ Options:
 | `--contract-strict` | Fail when an OpenAPI path/method/schema is missing (default: skip/warn) |
 | `--reruns N` | Re-run failed *tests* up to N times (distinct from `EXPECT RETRY`) |
 | `--listener PATH[:Class]` | Python listener called after each test / suite (repeatable) |
+| `--plugin PATH[:name]` | Extra Python extension (repeatable). Prefer `extensions/` or `snapapi.yaml` |
 | `--on-fail curl` / `--on-fail har:dir` | Emit a redacted curl or HAR on failure |
 | `--safe-url` | Block private/metadata hosts |
 | `--proxy URL` | HTTP/HTTPS proxy |
@@ -97,6 +170,7 @@ Options:
 | `--cacert PATH` | CA bundle used to verify TLS |
 | `snapapi lint PATH` | Parse/validate without HTTP |
 | `snapapi fmt PATH` | Format `.sapi` files |
+| `snapapi convert 'curl …'` / `file.sh` / `--clipboard` | Convert curl to a `.sapi` suite |
 | `snapapi openapi spec.yaml` | Generate GET/POST/PUT/PATCH/DELETE smoke tests |
 | `snapapi history [--failed] [--since 7d]` | Print `.snapapi/history.jsonl` |
 | `snapapi mock mock.json [--port 0]` | Serve routes from a JSON mock file (prints the URL) |
@@ -106,7 +180,7 @@ The process exits `0` when every test passed, `1` when a test failed, and `2` on
 
 ## DSL
 
-Recommended form:
+Recommended form (after you have a first PASS — see above). `https://api.example.com` is a **placeholder**, not a live host:
 
 ```
 SUITE: Book Store
@@ -164,10 +238,10 @@ EXPECT: HEADER Content-Type CONTAINS json
 
 ### Keywords
 
-- Suite: `SUITE`, `DESC`, `URL`, `TIMEOUT`, `FOLLOW-REDIRECTS`, `OPTIONS`, `IMPORT`, `SUITE-SETUP`, `SET`
-- Test: `TEST`, `TAG`, `SETUP`, `TEARDOWN`, `DEPENDS`, `SKIP`, `ONLY`, `QUARANTINE`, `EXAMPLES`, `SET`
+- Suite: `SUITE`, `DESC`, `URL`, `TIMEOUT`, `FOLLOW-REDIRECTS`, `OPTIONS`, `IMPORT`, `SUITE-SETUP`, `SET`, `CALL`
+- Test: `TEST`, `TAG`, `SETUP`, `TEARDOWN`, `DEPENDS`, `SKIP`, `ONLY`, `QUARANTINE`, `EXAMPLES`, `SET`, `CALL`
 - Helper: `HELPER` (named procedure for `SUITE-SETUP` / `SETUP` / `TEARDOWN`; not a test case)
-- Request: `REQUEST`, `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`, `BODY`/`DATA`, `FILE`, `GRAPHQL`, `HEADER`/`HEADERS`, `QUERY`, `PARAM`, `AUTH`, `EXPECT`, `SAVE`, `WAIT`, `SET`
+- Request: `REQUEST`, `GET`/`POST`/`PUT`/`PATCH`/`DELETE`/`HEAD`, `BODY`/`DATA`, `FILE`, `GRAPHQL`, `HEADER`/`HEADERS`, `QUERY`, `PARAM`, `AUTH`, `EXPECT`, `SAVE`, `WAIT`, `SET`, `CALL`
 
 HTTP `OPTIONS` is written as `REQUEST: OPTIONS /path` so it does not collide with suite-level `OPTIONS: {...}` JSON. `HEAD: /x` is a request alias like `GET:`.
 
@@ -211,17 +285,33 @@ EXPECT: status == 200 RETRY 5 ON 5xx BACKOFF 1s
 EXPECT: body contains userId
 EXPECT: body not contains stack
 EXPECT: json $.email matches ^.+@example\\.com$
+EXPECT: json $.email not matches @tempmail
 EXPECT: json $.items length == 3
+EXPECT: json $.items empty
+EXPECT: json $.items not empty
+EXPECT: json $.id type string
+EXPECT: json $.status in ["open","pending"]
+EXPECT: json $.email starts-with "ada@"
+EXPECT: json $.email ends-with "@example.com"
+EXPECT: json $.tags contains-all ["a","b"]
+EXPECT: json $.tags contains-only ["a","b"]
+EXPECT: json $.tags contains-any ["admin","owner"]
+EXPECT: json $.ids unique
+EXPECT: json $.count between 1 10
+EXPECT: json $.score close-to 0.33 delta 0.01
 EXPECT: json $.items[*].id contains 3
 EXPECT: json $.items[?(@.status=="open")].id contains 3
-EXPECT: json $.tags contains-all ["a","b"]
 EXPECT: json $.items each $.status == "active"
+EXPECT: json $.ok == true BECAUSE "login should succeed"
 EXPECT: status == 400 OR status == 401
 EXPECT: json $.success == false AND body contains error
 EXPECT: (status == 400 OR status == 401) AND json $.success == false
 EXPECT: schema ./schemas/user.json
 EXPECT: duration < 200ms
 EXPECT: header Content-Type contains json
+EXPECT: header Content-Type starts-with application
+EXPECT: body empty
+EXPECT: body starts-with {"ok"
 EXPECT: openapi ./openapi.yaml
 EXPECT: openapi ./openapi.yaml strict
 EXPECT: xpath //Order/@id == "1"
@@ -238,7 +328,7 @@ EXPECT: HEADER Content-Type CONTAINS json
 
 JSONPath is a small subset: `$.a.b`, `$.items.0.id`, `$.items[0].id`, `$.items[*].id`, and equality filters `$.items[?(@.status=="open")]` / `$.items[?(@.id==1)]`.
 
-`AND` / `OR` combine checks on one line (`AND` binds tighter than `OR`; parentheses group). Quote a value if it contains those words. Multiple `EXPECT` lines on the same request still all have to pass.
+`AND` / `OR` combine checks on one line (`AND` binds tighter than `OR`; parentheses group). Quote a value if it contains those words. Multiple `EXPECT` lines on the same request all run; if more than one fails, every failure is reported together. `BECAUSE "reason"` on an EXPECT line is prepended to that check's failure message.
 
 XPath uses stdlib `xml.etree` (descendant tags and `/@attr`). Axes, namespaces, and functions are not implemented.
 
@@ -246,7 +336,9 @@ XPath uses stdlib `xml.etree` (descendant tags and `/@attr`). Axes, namespaces, 
 
 `${NAME}` is expanded in URLs, paths, headers, data, and expect values.
 
-Lookup order: process environment, then `--env` / auto-discovered suite env file, then `SET` / `SAVE` values.
+Lookup order: process environment, then `--env` / auto-discovered suite env file, then `SET` / `SAVE` / `CALL` values.
+
+Built-in functions: `${uuid()}`, `${now()}`, `${random.int(min,max)}`. Custom functions use `CALL: signature = crypto.generate_signature(${PAYLOAD}, ${SECRET})` with modules in `extensions/`. They take explicit arguments and cannot skip steps or make HTTP.
 
 ## Sample suite
 
@@ -254,7 +346,7 @@ Lookup order: process environment, then `--env` / auto-discovered suite env file
 
 HTML reports include redacted request/response bodies. VCR cassette keys include method, path, and (by default) sorted query string, `Content-Type`/`Accept`, and body. `OPTIONS: {"VCR-MATCH": ["query","body","accept","authorization"]}` or `--vcr-match authorization,query` replaces that default. Replay restores `Set-Cookie` onto the session.
 
-`snapapi mock tests/fixtures/mock.json --port 0` serves JSON routes. Routes may use path templates (`/users/{id}`), optional `match.query` / `match.body` subsets, and `delay_ms`. Exact paths win over templates. There is no language server, gRPC, or WebSocket support.
+`snapapi mock tests/fixtures/mock.json --port 0` serves JSON routes. Routes may use path templates (`/users/{id}`), optional `match.query` / `match.body` subsets, and `delay_ms`. Exact paths win over templates. There is no language server, gRPC, or WebSocket support. Python plugins are CLI-only (not the playground).
 
 ### pytest plugin
 
@@ -270,7 +362,7 @@ def test_marked(snapapi_run, request):
     snapapi_run(request.node.get_closest_marker("snapapi").args[0])
 ```
 
-`snapapi_run(path, **engine_kwargs)` returns `SuiteResult` and fails the pytest case when the suite is not ok.
+`snapapi_run(path, **engine_kwargs)` returns `SuiteResult` and fails the pytest case when the suite is not ok. Pass `plugins={"hmac": hmac}` if you are not using `extensions/`.
 
 ## Project layout
 
@@ -282,6 +374,7 @@ snapapi/
 │   ├── api_client.py     # requests wrapper
 │   └── cli.py            # snapapi command
 ├── tests/                # pytest + sample .sapi / .snaptest suites
+├── examples/             # hello GET, users POST/SAVE/AUTH/HELPER, plugins
 ├── docs/                 # User guide + in-browser playground
 ├── snapapi-language/     # VS Code grammar / run command
 ├── pyproject.toml

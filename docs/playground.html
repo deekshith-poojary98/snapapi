@@ -3,34 +3,52 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
   <title>Playground — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="layout">
-    <aside class="sidebar">
-      <a class="brand" href="index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
-      <div class="nav-label">Guide</div>
-      <nav>
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
         <a href="index.html">Home</a>
-        <a href="index.html#why">Why SnapAPI?</a>
         <a href="guide/install.html">Install</a>
         <a href="guide/quick-start.html">Quick start</a>
-        <a href="guide/dsl.html">DSL reference</a>
+        <a href="guide/not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="guide/post.html">POST</a>
+        <a href="guide/save.html">SAVE</a>
+        <a href="guide/env.html">Env / AUTH</a>
+        <a href="guide/helpers.html">Helpers</a>
+        <a href="guide/your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="guide/dsl.html">DSL</a>
         <a href="guide/cli.html">CLI</a>
-        <a href="guide/ci.html">CI / reports</a>
+        <a href="guide/plugins.html">Plugins</a>
+        <a href="guide/ci.html">CI</a>
         <a href="guide/vscode.html">VS Code</a>
+        <a href="guide/troubleshooting.html">Troubleshooting</a>
         <a class="cta active" href="playground.html">Playground</a>
       </nav>
-      <p class="hint">Client-side interpreter. Default traffic never leaves this tab.</p>
+      <p class="hint">Runs in this tab. Nothing leaves unless you turn on Live fetch.</p>
     </aside>
-    <main class="content wide">
-      <button class="menu-btn btn btn-ghost" type="button" data-menu>Menu</button>
+    <main class="content wide" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
       <div class="playground-shell">
         <header>
           <p class="kicker">Try it here</p>
           <h1>Playground</h1>
-          <p class="lede">Type a <code>.sapi</code> suite and click Run. By default, requests hit an in-memory mock (<code>/api/users</code>, <code>/health</code>, <code>/jobs/:id</code>) so nothing needs Python or a network.</p>
+          <p class="lede">Click Run. Hello is a GET against the mock in this tab. The sample menu also has POST and SAVE.</p>
         </header>
         <div class="toolbar">
           <label>
@@ -62,13 +80,28 @@
             <pre id="output">Click Run.</pre>
           </section>
         </div>
-        <p class="note">
-          <strong>Mock</strong> (default): <code>URL:</code> empty, <code>mock://</code>, or Live fetch off — paths such as <code>GET: /api/users</code> are served in-memory.
-          Seed users <code>1</code> and <code>2</code> exist; <code>POST /api/users</code> returns <code>201</code> and an <code>id</code>; <code>PUT</code>/<code>PATCH</code>/<code>DELETE</code> work; <code>/jobs/:id</code> is pending twice then ready.
-          <strong>Live fetch</strong>: when the suite <code>URL:</code> is <code>https://…</code> (or <code>http://…</code>) and the checkbox is on, the playground uses <code>fetch()</code>. Browsers enforce CORS — many public APIs will fail with a network error even if curl would succeed. Stay on mock unless the target sends <code>Access-Control-Allow-Origin</code>.
-          Supported here: SUITE, DESC, URL, TEST, HELPER, TAG, SETUP, TEARDOWN, DEPENDS, GET/POST/PUT/PATCH/DELETE/HEAD, REQUEST, BODY JSON (and form/raw), HEADER(S), QUERY, PARAM, AUTH bearer/basic, EXPECT status/body/json/header, SAVE, <code>${var}</code>, SET, EXAMPLES (inline), WAIT, <code>//</code> comments.
-          Not supported (explicit error): FILE, GRAPHQL, IMPORT, SKIP/ONLY/QUARANTINE, AUTH oauth2/digest, EXPECT schema/xpath/duration/openapi.
-        </p>
+        <div class="note">
+          <section>
+            <h2>Mock</h2>
+            <p>Default. Empty <code>URL:</code>, <code>mock://</code>, or Live fetch off. Served in this tab:</p>
+            <ul>
+              <li><code>GET /users</code> and <code>/api/users</code> — users <code>1</code> and <code>2</code> already exist</li>
+              <li><code>POST /api/users</code> → <code>201</code> and an <code>id</code></li>
+              <li><code>PUT</code> / <code>PATCH</code> / <code>DELETE</code> on a user</li>
+              <li><code>/jobs/:id</code> pending twice, then ready</li>
+            </ul>
+          </section>
+          <section>
+            <h2>Live fetch</h2>
+            <p>Check the box and set <code>URL:</code> to <code>https://…</code> (or <code>http://…</code>) to use the browser’s <code>fetch()</code>.</p>
+            <p>CORS will block most public APIs even if curl works. Leave it off unless the host sends <code>Access-Control-Allow-Origin</code>.</p>
+          </section>
+          <section>
+            <h2>In this tab</h2>
+            <p>Works: GET/POST/PUT/PATCH/DELETE, BODY, HEADER, AUTH bearer/basic, EXPECT, SAVE, WAIT, HELPER, SETUP, inline EXAMPLES.</p>
+            <p>Errors if you try: FILE, GRAPHQL, IMPORT, SKIP, oauth2, schema, xpath, openapi.</p>
+          </section>
+        </div>
       </div>
     </main>
   </div>

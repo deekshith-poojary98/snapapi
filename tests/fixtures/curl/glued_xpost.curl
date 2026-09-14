@@ -1,0 +1,1 @@
+curl -XPOST https://api.example.com/items -d '{}'

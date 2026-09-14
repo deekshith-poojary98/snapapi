@@ -77,8 +77,12 @@
             },
             "patterns": [
                 {
+                    "name": "keyword.operator.word.snaptest",
+                    "match": "(?i)\\b(contains-all|contains-only|contains-any|starts-with|ends-with|close-to|not\\s+matches|not\\s+empty)\\b"
+                },
+                {
                     "name": "keyword.other.assertion.snaptest",
-                    "match": "(?i)\\b(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|RETRY|INLINE|OPENAPI|XPATH)\\b"
+                    "match": "(?i)\\b(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|RETRY|INLINE|OPENAPI|XPATH|BECAUSE|MATCHES|LENGTH|EACH|EMPTY|UNIQUE|BETWEEN)\\b"
                 },
                 {
                     "include": "#operators"
@@ -274,7 +278,7 @@
                     ]
                 },
                 {
-                    "begin": "^(\\s*)(DESC|URL|TIMEOUT|TAG|QUERY|PARAM|FILE|GRAPHQL|EXAMPLES|SKIP|ONLY|QUARANTINE|FOLLOW-REDIRECTS|WAIT|SET|DEPENDS)(:)",
+                    "begin": "^(\\s*)(DESC|URL|TIMEOUT|TAG|QUERY|PARAM|FILE|GRAPHQL|EXAMPLES|SKIP|ONLY|QUARANTINE|FOLLOW-REDIRECTS|WAIT|SET|CALL|DEPENDS)(:)",
                     "end": "$",
                     "beginCaptures": {
                         "2": {
@@ -294,7 +298,7 @@
         },
         "operators": {
             "name": "keyword.operator.comparison.snaptest",
-            "match": "==|!="
+            "match": "==|!=|(?i)contains-all|contains-only|contains-any|starts-with|ends-with|close-to|not\\s+matches|not\\s+empty"
         },
         "values": {
             "patterns": [

@@ -3,32 +3,51 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
   <title>VS Code — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="layout">
-    <aside class="sidebar">
-      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
-      <div class="nav-label">Guide</div>
-      <nav>
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
         <a href="../index.html">Home</a>
-        <a href="../index.html#why">Why SnapAPI?</a>
         <a href="install.html">Install</a>
         <a href="quick-start.html">Quick start</a>
-        <a href="dsl.html">DSL reference</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
         <a href="cli.html">CLI</a>
-        <a href="ci.html">CI / reports</a>
+        <a href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
         <a class="active" href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a class="cta" href="../playground.html">Playground</a>
       </nav>
-      <p class="hint">The language pack lives in snapapi-language/. There is no separate language-server process.</p>
+      <p class="hint">Not on the Marketplace. Copy snapapi-language into your editor extensions folder.</p>
     </aside>
-    <main class="content">
-      <button class="menu-btn btn btn-ghost" type="button" data-menu>Menu</button>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
       <p class="kicker">Editor</p>
       <h1>VS Code / Cursor</h1>
-      <p class="lede">The <code>snapapi-language</code> folder is a VS Code extension for <code>.sapi</code> files: syntax highlighting, snippets, completions, lightweight diagnostics, and run commands that shell out to the CLI. The older <code>.snaptest</code> extension is still associated.</p>
+      <p class="lede">Highlighting, snippets, and a Run command for <code>.sapi</code> files. Lives in the <code>snapapi-language</code> folder. Older <code>.snaptest</code> files still highlight.</p>
+      <div class="callout warn">It isn’t on the VS Code Marketplace. Copy the folder from the repo, or build a VSIX. There’s nothing to search for in Extensions.</div>
 
       <h2>What you get</h2>
       <ul>
@@ -39,23 +58,24 @@
         <li><strong>SnapAPI: Run current file</strong> and <strong>Run test at cursor</strong> (the latter passes <code>snapapi --name</code>)</li>
       </ul>
 
-      <h2>Install from this repo (debug)</h2>
+      <h2>Install from this repo</h2>
+      <p>Clone <a href="https://github.com/deekshith-poojary98/snapapi">deekshith-poojary98/snapapi</a>, then copy the language pack into your editor:</p>
+      <pre><code class="language-bash">cp -R snapapi-language ~/.vscode/extensions/deekshithpoojary.snapapi-language-0.1.0</code></pre>
+      <p>Restart the editor. Cursor uses <code>~/.cursor/extensions/</code> instead. Open a <code>.sapi</code> file and highlighting should kick in.</p>
+
+      <h2>VSIX</h2>
+      <pre><code class="language-bash">cd snapapi-language
+npx @vscode/vsce package
+code --install-extension snapapi-language-0.1.0.vsix</code></pre>
+      <p>Install the CLI separately (<code>pip install pysnapapi</code>, or <code>pip install -e .</code> from the repo). GUI editors often drop the venv from <code>PATH</code> — set <code>snapapi.cliPath</code> or keep a <code>.venv</code> in the workspace.</p>
+
+      <h2>Contributor debug</h2>
       <ol>
         <li>Open the <code>snapapi-language</code> folder in VS Code or Cursor.</li>
         <li>Press <kbd>F5</kbd> to launch an Extension Development Host.</li>
         <li>Open a <code>.sapi</code> file.</li>
       </ol>
       <p>If the workspace is the SnapAPI repo root, set the launch argument to <code>--extensionDevelopmentPath=${workspaceFolder}/snapapi-language</code>.</p>
-
-      <h2>Copy into extensions</h2>
-      <pre><code class="language-bash">cp -R snapapi-language ~/.vscode/extensions/deekshithpoojary.snapapi-language-0.1.0</code></pre>
-      <p>Restart the editor. For Cursor, use <code>~/.cursor/extensions/</code> instead.</p>
-
-      <h2>VSIX</h2>
-      <pre><code class="language-bash">cd snapapi-language
-npx @vscode/vsce package
-code --install-extension snapapi-language-0.1.0.vsix</code></pre>
-      <p>The CLI must be installed separately (<code>pip install -e .</code> from the repo root, or put <code>snapapi</code> on <code>PATH</code>).</p>
 
       <h2>Settings</h2>
       <table>
@@ -72,11 +92,11 @@ code --install-extension snapapi-language-0.1.0.vsix</code></pre>
 }</code></pre>
 
       <h2>Run current file</h2>
-      <p>With a <code>.sapi</code> editor focused, run <strong>SnapAPI: Run current file</strong> from the command palette. The file is saved, then the extension runs <code>snapapi &lt;file&gt;</code>. SnapAPI loads a sibling env file automatically (<code>&lt;suite&gt;.env</code>, <code>.env</code>, or the only <code>*.env</code> next to the suite) unless <code>snapapi.envFile</code> is set. <strong>Run test at cursor</strong> uses the nearest <code>TEST:</code> above the cursor and passes <code>--name</code>. Output goes to the SnapAPI channel; the status bar shows the last result while a <code>.sapi</code> file is active.</p>
-      <div class="callout">The playground does not use the extension. Use it to learn the DSL; use the CLI (or these commands) for real HTTP.</div>
+      <p>With a <code>.sapi</code> file focused, <strong>SnapAPI: Run current file</strong> saves it and runs <code>snapapi &lt;file&gt;</code>. Env next to the suite loads automatically unless you set <code>snapapi.envFile</code>. <strong>Run test at cursor</strong> uses the nearest <code>TEST:</code> and passes <code>--name</code>. Output goes to the SnapAPI channel; the status bar shows the last result.</p>
+      <div class="callout">The playground doesn’t use the extension. Learn the language there; use the CLI (or these commands) for real HTTP.</div>
       <div class="page-nav">
-        <a href="ci.html"><span>Previous</span>CI / reports</a>
-        <a href="../playground.html"><span>Next</span>Playground</a>
+        <a href="ci.html" rel="prev"><span>Previous</span><strong>CI / reports</strong></a>
+        <a href="troubleshooting.html" rel="next"><span>Next</span><strong>Troubleshooting</strong></a>
       </div>
     </main>
   </div>

@@ -1,0 +1,11 @@
+{
+  "warnings": [],
+  "must_contain": [
+    "HEADER Cookie: session=abc; theme=dark"
+  ],
+  "semantic": {
+    "method": "GET",
+    "endpoint": "/x",
+    "headers": {"Cookie": "session=abc; theme=dark"}
+  }
+}

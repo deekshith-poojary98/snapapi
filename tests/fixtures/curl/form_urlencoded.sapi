@@ -1,0 +1,7 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Create Login
+  POST: /login
+  HEADER Content-Type: application/x-www-form-urlencoded
+  BODY: form user=jane&pass=secret

@@ -18,6 +18,7 @@ SUITE_KEYWORDS = {
     "SUITE-SETUP",
     "SUITE-TEARDOWN",
     "SET",
+    "CALL",
 }
 TEST_STARTERS = {"TEST", "HELPER"}
 CHILD_KEYWORDS = {
@@ -45,6 +46,7 @@ CHILD_KEYWORDS = {
     "FOLLOW-REDIRECTS",
     "WAIT",
     "SET",
+    "CALL",
 } | set(HTTP_METHODS)
 
 

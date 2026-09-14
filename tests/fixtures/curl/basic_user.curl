@@ -1,0 +1,1 @@
+curl -u alice:secret https://api.example.com/me

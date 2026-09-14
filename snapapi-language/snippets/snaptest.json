@@ -138,6 +138,16 @@
         "body": "DEPENDS: ${1:Create User}",
         "description": "Run named tests first; skip this test if they failed or skipped"
     },
+    "SET": {
+        "prefix": "SET",
+        "body": "SET: ${1:name} ${2:value}",
+        "description": "Assign a variable without HTTP"
+    },
+    "CALL": {
+        "prefix": "CALL",
+        "body": "CALL: ${1:signature} = ${2:crypto.generate_signature}(${3:\\${PAYLOAD\\}}, ${4:\\${SECRET\\}})",
+        "description": "Assign a variable from an extensions/ function"
+    },
     "IMPORT": {
         "prefix": "IMPORT",
         "body": "IMPORT: ${1:other.sapi}",

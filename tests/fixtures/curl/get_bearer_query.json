@@ -1,0 +1,21 @@
+{
+  "warnings": [],
+  "must_contain": [
+    "AUTH: bearer abc123",
+    "QUERY: page=2"
+  ],
+  "must_not_contain": [
+    "HEADER Authorization:",
+    "Bearer $TOKEN"
+  ],
+  "semantic": {
+    "base_url": "https://api.example.com",
+    "method": "GET",
+    "endpoint": "/users",
+    "query": {"page": "2"},
+    "auth": "bearer abc123",
+    "prefer_auth": true,
+    "headers": {"Content-Type": "application/json"},
+    "headers_absent": ["Authorization"]
+  }
+}

@@ -1,0 +1,6 @@
+SUITE: Hello API
+URL: http://127.0.0.1:8765
+
+TEST: Get Users
+  GET: /users
+  EXPECT: status == 200

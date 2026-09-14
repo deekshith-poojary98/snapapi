@@ -1,0 +1,6 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Create Upload
+  POST: /upload
+  BODY: form file=@./photo.png&note=hi

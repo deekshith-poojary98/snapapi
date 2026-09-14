@@ -1,0 +1,8 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Create User
+  POST: /users
+  HEADER Content-Type: application/json
+  HEADER Accept: application/json
+  BODY: {"name": "Jane"}

@@ -1,0 +1,11 @@
+{
+  "warnings_contain": [
+    "Shell command substitution"
+  ],
+  "must_contain": [
+    "${SHELL_OUTPUT}"
+  ],
+  "must_not_contain": [
+    "generate_payload"
+  ]
+}

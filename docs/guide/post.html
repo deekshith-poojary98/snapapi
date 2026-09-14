@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
+  <title>POST — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
+        <a href="../index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a class="active" href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
+        <a href="cli.html">CLI</a>
+        <a href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
+        <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">POST with a JSON body.</p>
+    </aside>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
+      <p class="kicker">Learn</p>
+      <h1>POST a JSON body</h1>
+      <p class="lede">Same as the GET, except you send JSON and expect 201.</p>
+
+      <h2>Playground</h2>
+      <p>In the <a href="../playground.html">playground</a>, pick the <strong>POST</strong> sample:</p>
+      <pre><code class="language-snaptest">SUITE: Users
+URL: mock://api
+
+TEST: Create User
+  POST: /users
+  BODY: {"name": "Jane", "email": "jane@example.com"}
+  EXPECT: status == 201</code></pre>
+      <p>Click <strong>Run</strong>. The mock answers with 201. You want <code>1 passed  0 failed</code>.</p>
+
+      <h2>On the CLI</h2>
+      <p>The hello <code>mock.json</code> only has <code>GET /users</code>, so a POST against it 404s. Use this one instead (in the repo: <code>examples/users/mock.json</code>):</p>
+      <pre><code class="language-json">{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/users",
+      "status": 200,
+      "json": { "data": [{ "id": 7, "name": "Ada" }] }
+    },
+    {
+      "method": "POST",
+      "path": "/users",
+      "status": 201,
+      "json": { "id": 7, "name": "Jane", "email": "jane@example.com" }
+    },
+    {
+      "method": "GET",
+      "path": "/users/{id}",
+      "status": 200,
+      "json": { "id": 7, "name": "Jane", "email": "jane@example.com" }
+    }
+  ]
+}</code></pre>
+      <p>Then <code>post.sapi</code>:</p>
+      <pre><code class="language-snaptest">SUITE: Users
+URL: http://127.0.0.1:8765
+
+TEST: Create User
+  POST: /users
+  BODY: {"name": "Jane", "email": "jane@example.com"}
+  EXPECT: status == 201</code></pre>
+      <p>One terminal:</p>
+      <pre><code class="language-bash">snapapi mock mock.json --port 8765</code></pre>
+      <p>Another, same folder, venv on:</p>
+      <pre><code class="language-bash">snapapi post.sapi</code></pre>
+      <p>A good run:</p>
+      <pre><code>SnapAPI  Users
+
+  Create User
+    POST /users                       201  4ms
+  PASS  4ms
+
+  1 passed  0 failed  4ms</code></pre>
+      <p>If you get <code>expected 201, got 404</code>, the hello mock is still sitting on 8765. Stop it and start this file.</p>
+      <div class="page-nav">
+        <a href="quick-start.html" rel="prev"><span>Previous</span><strong>Quick start</strong></a>
+        <a href="save.html" rel="next"><span>Next</span><strong>SAVE</strong></a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

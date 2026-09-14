@@ -330,9 +330,11 @@ def test_openapi_emits_non_get_and_params(tmp_path):
         encoding="utf-8",
     )
     text = generate_smoke(spec)
+    assert "TAG: smoke" in text
     assert "GET: /users/9" in text
     assert "QUERY: verbose=true" in text
     assert "POST: /users" in text
+    assert "HEADER Content-Type: application/json" in text
     assert 'BODY: {"name": "Jane"}' in text
     assert "PUT: /users" in text
     assert "PATCH: /users" in text

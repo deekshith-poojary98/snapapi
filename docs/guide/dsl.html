@@ -3,42 +3,61 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
   <title>DSL reference — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="layout">
-    <aside class="sidebar">
-      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
-      <div class="nav-label">Guide</div>
-      <nav>
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
         <a href="../index.html">Home</a>
-        <a href="../index.html#why">Why SnapAPI?</a>
         <a href="install.html">Install</a>
         <a href="quick-start.html">Quick start</a>
-        <a class="active" href="dsl.html">DSL reference</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a class="active" href="dsl.html">DSL</a>
         <a href="cli.html">CLI</a>
-        <a href="ci.html">CI / reports</a>
+        <a href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
         <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a class="cta" href="../playground.html">Playground</a>
       </nav>
       <p class="hint">Keywords match the Python parser. They are single tokens (hyphens allowed, spaces are not). Unknown keywords are parse errors.</p>
     </aside>
-    <main class="content">
-      <button class="menu-btn btn btn-ghost" type="button" data-menu>Menu</button>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
       <p class="kicker">Language</p>
       <h1>DSL reference</h1>
-      <p class="lede">A <code>.sapi</code> file is a suite of named tests. Each test has one or more HTTP steps. Comments are <code>//</code> lines. Blank lines are ignored. Indentation is cosmetic. The older <code>.snaptest</code> extension still works.</p>
-      <ol class="toc">
-        <li><a href="#suite">Suite</a></li>
-        <li><a href="#test">Test</a></li>
-        <li><a href="#request">Request</a></li>
-        <li><a href="#body">Bodies</a></li>
-        <li><a href="#expect">Expect</a></li>
-        <li><a href="#save">SAVE, SET, variables</a></li>
-        <li><a href="#wait">WAIT and retries</a></li>
-        <li><a href="#legacy">Modern vs legacy</a></li>
-      </ol>
+      <p class="lede">What the parser accepts. Indentation doesn’t matter. New files should be <code>.sapi</code>; older <code>.snaptest</code> fixtures still run.</p>
+      <nav class="toc" aria-label="On this page">
+        <a href="#suite">Suite</a>
+        <a href="#test">Test</a>
+        <a href="#request">Request</a>
+        <a href="#body">Bodies</a>
+        <a href="#expect">Expect</a>
+        <a href="#save">SAVE / SET</a>
+        <a href="#plugins">Plugins</a>
+        <a href="#wait">WAIT</a>
+        <a href="#legacy">Legacy</a>
+      </nav>
 
       <h2 id="suite">Suite</h2>
       <pre><code class="language-snaptest">SUITE: Book Store
@@ -59,13 +78,14 @@ IMPORT: shared.sapi</code></pre>
         <tbody>
           <tr><td><code>SUITE</code></td><td>Display name. Defaults to the file stem if omitted.</td></tr>
           <tr><td><code>DESC</code></td><td>Suite description, or test description when it sits under <code>TEST</code>.</td></tr>
-          <tr><td><code>URL</code></td><td>Base URL. May be overridden per test. Interpolates <code>${VAR}</code>.</td></tr>
+          <tr><td><code>URL</code></td><td>Base URL. Can be set per test. Interpolates <code>${VAR}</code>. <code>https://api.example.com</code> in samples is a placeholder — see <a href="your-api.html">Your API</a>.</td></tr>
           <tr><td><code>TIMEOUT</code></td><td>HTTP timeout in seconds for the suite.</td></tr>
           <tr><td><code>FOLLOW-REDIRECTS</code></td><td>Boolean. Also allowed on a step.</td></tr>
           <tr><td><code>OPTIONS</code></td><td>JSON object of suite options (<code>TIMEOUT</code>, <code>OPENAPI</code>, <code>VCR-MATCH</code>, …). Suite-level only; HTTP OPTIONS uses <code>REQUEST: OPTIONS /path</code>. Stop-on-failure is CLI-only: <code>-x</code> / <code>--stop-on-failure</code>.</td></tr>
           <tr><td><code>HEADER</code> / <code>HEADERS</code></td><td>Default headers. Line form or JSON object.</td></tr>
           <tr><td><code>AUTH</code></td><td>Default auth for following requests.</td></tr>
           <tr><td><code>SET</code></td><td>Assign a value without HTTP, e.g. <code>SET: orderId ${uuid()}</code>.</td></tr>
+          <tr><td><code>CALL</code></td><td><code>CALL: signature = crypto.generate_signature(${PAYLOAD}, ${SECRET})</code>. Stores the return value. See <a href="plugins.html">CALL</a>.</td></tr>
           <tr><td><code>IMPORT</code></td><td>Pull tests from another <code>.sapi</code> file (path relative to the current file). Not in the playground.</td></tr>
           <tr><td><code>HELPER</code></td><td>Named procedure with the same request/EXPECT/SAVE body as a test, but it is <strong>not</strong> a test case. Use it from <code>SUITE-SETUP</code> / <code>SETUP</code> / <code>TEARDOWN</code>.</td></tr>
           <tr><td><code>SUITE-SETUP</code></td><td>Name of a <code>HELPER</code> (or a <code>TEST</code>) to run once before primaries. <code>SUITE-TEARDOWN</code> after.</td></tr>
@@ -93,6 +113,7 @@ Bob,bob@example.com
           <tr><td><code>EXAMPLES</code></td><td>Inline CSV (header + rows) or a <code>.csv</code> path. Each row becomes <code>Test [first-cell]</code> with those variables. Playground supports inline tables only.</td></tr>
           <tr><td><code>SKIP</code> / <code>ONLY</code> / <code>QUARANTINE</code></td><td>CLI filters. Not implemented in the playground (you get a clear error).</td></tr>
           <tr><td><code>SET</code></td><td>Test-scoped assignment, interpolated before steps.</td></tr>
+          <tr><td><code>CALL</code></td><td>Test-scoped <code>CALL: name = function(${ARG})</code>. Not in the playground.</td></tr>
         </tbody>
       </table>
 
@@ -147,30 +168,48 @@ EXPECT: body contains userId
 EXPECT: body not contains stack
 EXPECT: json $.email == "jane@example.com"
 EXPECT: json $.email matches ^.+@example\\.com$
+EXPECT: json $.email not matches @tempmail
 EXPECT: json $.items length == 3
+EXPECT: json $.items empty
+EXPECT: json $.items not empty
+EXPECT: json $.id type string
+EXPECT: json $.status in ["open","pending"]
+EXPECT: json $.email starts-with "ada@"
+EXPECT: json $.email ends-with "@example.com"
+EXPECT: json $.tags contains-all ["a","b"]
+EXPECT: json $.tags contains-only ["a","b"]
+EXPECT: json $.tags contains-any ["admin","owner"]
+EXPECT: json $.ids unique
+EXPECT: json $.count between 1 10
+EXPECT: json $.score close-to 0.33 delta 0.01
 EXPECT: json $.items[*].id contains 3
 EXPECT: json $.items[?(@.status=="open")].id contains 3
-EXPECT: json $.tags contains-all ["a","b"]
 EXPECT: json $.items each $.status == "active"
+EXPECT: json $.ok == true BECAUSE "login should succeed"
 EXPECT: status == 400 OR status == 401
 EXPECT: json $.success == false AND body contains error
 EXPECT: (status == 400 OR status == 401) AND json $.success == false
 EXPECT: header Content-Type contains json
+EXPECT: header Content-Type starts-with application
+EXPECT: body empty
 EXPECT: schema ./schemas/user.json
 EXPECT: duration &lt; 200ms
 EXPECT: openapi ./openapi.yaml
 EXPECT: openapi ./openapi.yaml strict
 EXPECT: xpath //Order/@id == "1"</code></pre>
-      <p><code>AND</code> / <code>OR</code> combine checks on one line. <code>AND</code> binds tighter than <code>OR</code>; use parentheses to group. Quote a value if it contains the words <code>AND</code> or <code>OR</code>. Multiple <code>EXPECT</code> lines on the same request still all have to pass.</p>
+      <p><code>AND</code> / <code>OR</code> combine checks on one line. <code>AND</code> binds tighter than <code>OR</code>; use parentheses to group. Quote a value if it contains the words <code>AND</code> or <code>OR</code>. Multiple <code>EXPECT</code> lines on the same request all run; if more than one fails, every failure is reported together. <code>BECAUSE "reason"</code> is prepended to that check's failure message.</p>
       <p>JSONPath is a small subset: <code>$.a.b</code>, <code>$.items.0.id</code>, <code>$.items[0].id</code>, <code>$.items[*].id</code>, and equality filters <code>$.items[?(@.status=="open")]</code>. XPath uses stdlib <code>xml.etree</code> (descendant tags and <code>/@attr</code>); axes, namespaces, and functions are not implemented.</p>
-      <p>The playground runs status, body contains, json equality/contains/matches/length, and header checks. Schema, XPath, duration, and OpenAPI expects print a playground error instead of failing silently.</p>
+      <p>The playground runs status, body, json, and header checks, including the operators above. Schema, XPath, duration, and OpenAPI expects print a playground error instead of failing silently.</p>
 
       <h2 id="save">SAVE, SET, and variables</h2>
       <pre><code class="language-snaptest">SAVE: userId FROM $.id
 SAVE: requestId FROM header X-Request-Id
 SET: orderId ${uuid()}</code></pre>
-      <p><code>${NAME}</code> expands in URLs, paths, headers, bodies, and expect values. Lookup order: process environment, then <code>--env</code> / auto-discovered suite env / <code>--profile</code>, then <code>SET</code> / <code>SAVE</code>. Helpers: <code>${uuid()}</code>, <code>${now()}</code>, <code>${random.int(min,max)}</code>. Undefined variables are errors.</p>
-      <p>The playground seeds <code>${TOKEN}</code> as <code>playground-token</code> so bearer samples run without an env file.</p>
+      <p><code>${NAME}</code> expands in URLs, paths, headers, bodies, and expect values. Lookup order: process environment, then <code>--env</code> / auto-discovered suite env / <code>--profile</code>, then <code>SET</code> / <code>SAVE</code> / <code>CALL</code>. Built-in functions: <code>${uuid()}</code>, <code>${now()}</code>, <code>${random.int(min,max)}</code>. Custom functions use <a href="plugins.html"><code>CALL</code></a>. Undefined variables are errors.</p>
+      <p>The playground seeds <code>${TOKEN}</code> as <code>playground-token</code> so bearer samples run without an env file. Plugins are CLI-only.</p>
+
+      <h2 id="plugins">Plugins</h2>
+      <p>A plugin is a Python function loaded from <code>extensions/</code> (or <code>snapapi.yaml</code> / <code>--plugin</code>). The suite calls it with <code>CALL: signature = crypto.generate_signature(${PAYLOAD}, ${SECRET})</code> and uses <code>${signature}</code>. Arguments are explicit. The function returns a value; it does not mutate SnapAPI variables, assert, or issue the HTTP under test. <code>CALL</code> is computation, not a second HTTP engine. Exceptions fail that test as <code>CALL FAILED</code>, not a traceback. There is no <code>IF</code> / <code>FOR</code> / <code>WHILE</code> — see <a href="not-for-you.html">When SnapAPI is not for you</a> and <a href="plugins.html">CALL</a>.</p>
 
       <h2 id="wait">WAIT and retries</h2>
       <pre><code class="language-snaptest">WAIT: json $.status == "ready" TIMEOUT 10s BACKOFF 0.5s
@@ -192,8 +231,8 @@ EXPECT: json $.status == "ready" RETRY 20 BACKOFF 0.5s</code></pre>
         </tbody>
       </table>
       <div class="page-nav">
-        <a href="quick-start.html"><span>Previous</span>Quick start</a>
-        <a href="cli.html"><span>Next</span>CLI</a>
+        <a href="your-api.html" rel="prev"><span>Previous</span><strong>Your API</strong></a>
+        <a href="cli.html" rel="next"><span>Next</span><strong>CLI</strong></a>
       </div>
     </main>
   </div>

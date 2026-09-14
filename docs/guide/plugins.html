@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
+  <title>CALL — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
+        <a href="../index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
+        <a href="cli.html">CLI</a>
+        <a class="active" href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
+        <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">Python stays out of the .sapi file.</p>
+    </aside>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
+      <p class="kicker">Tooling</p>
+      <h1>CALL</h1>
+      <p class="lede">When SnapAPI doesn’t know how to compute one value, assign it from a Python function. The <code>.sapi</code> file still reads as HTTP. It does not name Python files.</p>
+      <nav class="toc" aria-label="On this page">
+        <a href="#call">Assignment</a>
+        <a href="#where">Where</a>
+        <a href="#namespaces">Namespaces</a>
+        <a href="#returns">Returns</a>
+        <a href="#failed">Failures</a>
+        <a href="#compute">Computation only</a>
+        <a href="#state">Three states</a>
+        <a href="#contract">Contract</a>
+      </nav>
+
+      <h2 id="call">Assignment, then HTTP</h2>
+      <pre><code class="language-snaptest">SET: PAYLOAD snapapi
+CALL: signature = crypto.generate_signature(${PAYLOAD}, ${HMAC_SECRET})
+TEST: Signed request
+  GET: /users
+  HEADER: X-Signature: ${signature}
+  EXPECT: status == 200</code></pre>
+      <p>Mental model: <code>CALL: variable = function(arguments)</code> → Python runs → return value → <code>${variable}</code>. There is no <code>IF</code>, <code>FOR</code>, or <code>TRY</code>.</p>
+      <p>A <code>CALL</code> should behave like <code>result = function(arguments)</code>. Nothing more. No SnapAPI context object, no mutating test state, no secret assertions, no secret SnapAPI requests.</p>
+
+      <h2 id="where">Where the function lives</h2>
+      <p>Put modules in <code>extensions/</code> next to the suite (or a parent folder). SnapAPI loads public functions automatically. Optional <code>snapapi.yaml</code> lists them:</p>
+      <pre><code class="language-yaml">extensions:
+  - extensions.crypto</code></pre>
+      <pre><code>extensions/
+└── crypto.py</code></pre>
+      <pre><code class="language-python">def generate_signature(payload, secret):
+    ...
+    return digest</code></pre>
+      <p>Arguments are explicit. Pass <code>${PAYLOAD}</code>, not a hidden SnapAPI context. In the repo: <code>examples/plugins/</code> (same hello mock as quick start).</p>
+      <pre><code class="language-bash">snapapi mock examples/hello/mock.json --port 8765
+snapapi examples/plugins/signed.sapi -D HMAC_SECRET=dev</code></pre>
+
+      <h2 id="namespaces">Namespaces</h2>
+      <p>If two modules define the same function name, the bare name is an error. Qualify it:</p>
+      <pre><code class="language-snaptest">CALL: token = auth.generate_token()
+CALL: signature = crypto.generate_signature(${PAYLOAD}, ${HMAC_SECRET})</code></pre>
+      <p>Unique names can omit the module: <code>CALL: user = generate_user()</code>.</p>
+
+      <h2 id="returns">Return values</h2>
+      <p>A string or number becomes <code>${signature}</code> as you’d expect. An object or array is kept structured, so this works:</p>
+      <pre><code class="language-snaptest">CALL: user = testdata.generate_user()
+POST: /users
+BODY: ${user}</code></pre>
+      <p>Return a string, number, bool, object, or array. <code>None</code> fails the test. Tuples become arrays. Bytes must be UTF-8 text.</p>
+
+      <h2 id="failed">When a function fails</h2>
+      <p>An exception fails that test. SnapAPI prints a SnapAPI error, not a Python traceback:</p>
+      <pre><code>CALL FAILED
+  Function: crypto.generate_signature
+  Test: Create Payment
+  Error: Invalid secret</code></pre>
+      <p>Same shape for <code>None</code>, a disallowed return type, or an <code>async def</code>. Suite-level <code>CALL</code> stops the run before tests.</p>
+
+      <h2 id="compute">Computation, not the system under test</h2>
+      <div class="callout warn"><strong><code>CALL</code> is for computation, not for driving the system under test.</strong> If the HTTP isn’t in the <code>.sapi</code> file, SnapAPI did not run it.</div>
+      <div class="split">
+        <div>
+          <h3>Good</h3>
+          <pre><code class="language-snaptest">CALL: signature = crypto.generate_signature(${PAYLOAD}, ${SECRET})
+CALL: user = testdata.generate_user()
+CALL: expiry = crypto.expiry(${TTL})</code></pre>
+          <p>Compute a value. Assign it. Then <code>GET</code> / <code>POST</code> as usual.</p>
+        </div>
+        <div>
+          <h3>Bad</h3>
+          <pre><code class="language-snaptest">CALL: response = api.create_user()
+CALL: response = http_get("/users")</code></pre>
+          <p>That is not a replacement for <code>POST: /users</code>. The request will not appear in the report, retries, auth, or <code>EXPECT</code>. You bypassed SnapAPI’s HTTP engine. That is the boundary, not a bug.</p>
+        </div>
+      </div>
+
+      <h2 id="state">Three kinds of state</h2>
+      <p>Keep these separate. Mixing them is how plugins become impossible to debug.</p>
+      <table>
+        <thead>
+          <tr><th>Layer</th><th>Can mutate?</th><th>Visible to SnapAPI?</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>SnapAPI variables</td><td>Yes, through the DSL</td><td>Yes</td></tr>
+          <tr><td>Python module state</td><td>Yes</td><td>No</td></tr>
+          <tr><td>HTTP executed by Python</td><td>Yes, externally</td><td>No</td></tr>
+        </tbody>
+      </table>
+      <div class="split split-3">
+        <div>
+          <h3>SnapAPI variables</h3>
+          <pre><code class="language-snaptest">CALL: user = generate_user()
+BODY: ${user}</code></pre>
+          <p>Owned by SnapAPI. Test-scoped (copied per <code>--workers</code> worker). The only way a plugin changes them is by returning a value into the <code>CALL</code> variable.</p>
+        </div>
+        <div>
+          <h3>Plugin state</h3>
+          <pre><code class="language-python">cache = {}
+
+def generate_token():
+    ...</code></pre>
+          <p>Python process state. Module globals are shared across tests and workers. SnapAPI does not isolate them.</p>
+        </div>
+        <div>
+          <h3>HTTP from Python</h3>
+          <pre><code class="language-python">requests.get(...)</code></pre>
+          <p>Outside SnapAPI’s execution model. No <code>EXPECT</code>, <code>SAVE</code>, retries, auth, or reports. Don’t drive the API under test from a plugin.</p>
+        </div>
+      </div>
+      <div class="callout warn">Plugin functions must be thread-safe when using <code>--workers</code>. Module-level mutable state is shared between workers. A global <code>token = …</code> will get stomped. SnapAPI will not magically isolate Python modules; if you need process isolation later, that can be a runner change without touching the DSL.</div>
+
+      <h2 id="contract">Contract</h2>
+      <table>
+        <thead><tr><th>Question</th><th>Answer</th></tr></thead>
+        <tbody>
+          <tr><td>Allowed returns</td><td>String, number, bool, object, array. Tuple → array. UTF-8 bytes → string.</td></tr>
+          <tr><td><code>None</code></td><td>Fails the test: <code>returned None</code>.</td></tr>
+          <tr><td>Exceptions</td><td>Fail the test (or the suite, if <code>CALL</code> is above <code>TEST</code>). No traceback.</td></tr>
+          <tr><td>Async</td><td>Not supported. Use a synchronous function.</td></tr>
+          <tr><td>HTTP from Python</td><td>Invisible to SnapAPI. Not a second HTTP runner. See <a href="#state">three kinds of state</a>.</td></tr>
+          <tr><td>When plugins load</td><td>Once per process. Modules are cached. Each suite builds a name registry from <code>extensions/</code> / <code>snapapi.yaml</code> / <code>--plugin</code>.</td></tr>
+          <tr><td><code>--workers</code></td><td>Threads in one process. Plugin functions must be thread-safe. Module-level mutable state is shared. SnapAPI variables are copied per worker.</td></tr>
+          <tr><td>SnapAPI variables</td><td>Functions return a value. They do not receive a context and cannot assign <code>${token}</code> themselves. Object arguments are copied, so mutating them does not change SnapAPI state.</td></tr>
+        </tbody>
+      </table>
+      <div class="callout">Plugin functions return values. They don’t mutate SnapAPI state. <code>CALL: token = auth.generate_token()</code> is the model. A hidden <code>context["token"] = …</code> is not.</div>
+      <p>The function must not skip steps, issue the HTTP under test, or catch EXPECT. If you need that, keep pytest. See <a href="not-for-you.html">When SnapAPI is not for you</a>.</p>
+      <p><code>--plugin path.py</code> still loads an extra module (repeatable). Prefer <code>extensions/</code> so the suite never mentions a path. Listeners wrap the run; they don’t compute this value. The playground can’t load Python — use the CLI.</p>
+      <div class="page-nav">
+        <a href="cli.html" rel="prev"><span>Previous</span><strong>CLI</strong></a>
+        <a href="ci.html" rel="next"><span>Next</span><strong>CI / reports</strong></a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

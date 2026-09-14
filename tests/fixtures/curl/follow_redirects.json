@@ -1,0 +1,8 @@
+{
+  "warnings": [],
+  "semantic": {
+    "method": "GET",
+    "endpoint": "/go",
+    "follow_redirects": true
+  }
+}

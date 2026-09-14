@@ -1,0 +1,7 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Create Echo
+  POST: /echo
+  HEADER Content-Type: application/json
+  BODY: {"ok": true}

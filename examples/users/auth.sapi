@@ -1,0 +1,9 @@
+SUITE: Users
+URL: http://127.0.0.1:8765
+HEADER Content-Type: application/json
+
+TEST: Create User
+  POST: /users
+  AUTH: bearer ${TOKEN}
+  BODY: {"name": "Jane", "email": "jane@example.com"}
+  EXPECT: status == 201

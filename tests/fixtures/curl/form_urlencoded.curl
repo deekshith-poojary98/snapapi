@@ -1,0 +1,1 @@
+curl https://api.example.com/login -d 'user=jane&pass=secret' -H 'Content-Type: application/x-www-form-urlencoded'

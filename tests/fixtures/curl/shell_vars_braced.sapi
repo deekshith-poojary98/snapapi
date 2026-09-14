@@ -1,0 +1,6 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Get X
+  GET: /x
+  AUTH: bearer ${TOKEN}

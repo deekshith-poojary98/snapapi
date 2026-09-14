@@ -1,0 +1,18 @@
+{
+  "warnings": [],
+  "must_contain": [
+    "HEADER Content-Type: application/json",
+    "HEADER Accept: application/json",
+    "BODY: {\"name\": \"Jane\"}"
+  ],
+  "semantic": {
+    "method": "POST",
+    "endpoint": "/users",
+    "headers": {
+      "Content-Type": "application/json",
+      "Accept": "application/json"
+    },
+    "body": {"name": "Jane"},
+    "body_type": "json"
+  }
+}

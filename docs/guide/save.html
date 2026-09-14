@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
+  <title>SAVE — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
+        <a href="../index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a class="active" href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
+        <a href="cli.html">CLI</a>
+        <a href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
+        <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">SAVE an id, reuse it as ${userId}.</p>
+    </aside>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
+      <p class="kicker">Learn</p>
+      <h1>SAVE an id, then GET it</h1>
+      <p class="lede">Creates usually return an id. <code>SAVE</code> keeps it so the next request in the same test can use <code>${userId}</code>.</p>
+
+      <h2>Playground</h2>
+      <p>Pick <strong>SAVE then GET</strong> in the <a href="../playground.html">playground</a>:</p>
+      <pre><code class="language-snaptest">SUITE: Users
+URL: mock://api
+
+TEST: Create then fetch
+  POST: /users
+  BODY: {"name": "Jane", "email": "jane@example.com"}
+  EXPECT: status == 201
+  SAVE: userId FROM $.id
+  GET: /users/${userId}
+  EXPECT: status == 200
+  EXPECT: json $.email == "jane@example.com"</code></pre>
+      <p><code>FROM $.id</code> is JSONPath — the <code>id</code> field on the POST response. After SAVE, <code>${userId}</code> is that number. Click <strong>Run</strong>. Look for <code>saved userId=</code> and <code>1 passed</code>.</p>
+
+      <h2>On the CLI</h2>
+      <p>Same mock as <a href="post.html">POST</a> (needs <code>POST /users</code> and <code>GET /users/{id}</code>). In the repo: <code>examples/users/mock.json</code> and <code>examples/users/save.sapi</code>.</p>
+      <pre><code class="language-snaptest">SUITE: Users
+URL: http://127.0.0.1:8765
+
+TEST: Create then fetch
+  POST: /users
+  BODY: {"name": "Jane", "email": "jane@example.com"}
+  EXPECT: status == 201
+  SAVE: userId FROM $.id
+  GET: /users/${userId}
+  EXPECT: status == 200
+  EXPECT: json $.email == "jane@example.com"</code></pre>
+      <pre><code class="language-bash">snapapi mock mock.json --port 8765   # leave running
+snapapi save.sapi</code></pre>
+      <p>A good run:</p>
+      <pre><code>SnapAPI  Users
+
+  Create then fetch
+    POST /users                       201  4ms
+    saved userId=7
+    GET /users/7                      200  1ms
+  PASS  5ms
+
+  1 passed  0 failed  5ms</code></pre>
+      <p>POST created the user, SAVE kept <code>7</code>, GET fetched <code>/users/7</code>, email matched. One test, two calls.</p>
+      <p><code>Undefined variable ${userId}</code> means SAVE didn’t run, or the JSON doesn’t have <code>id</code> at the top (on a real API it’s often <code>$.data.id</code>).</p>
+      <div class="page-nav">
+        <a href="post.html" rel="prev"><span>Previous</span><strong>POST</strong></a>
+        <a href="env.html" rel="next"><span>Next</span><strong>Env / AUTH</strong></a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

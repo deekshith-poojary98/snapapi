@@ -59,6 +59,7 @@
     "HEAD",
     "GET",
     "SET",
+    "CALL",
     "URL",
   ];
 
@@ -69,7 +70,7 @@
   );
 
   var NAME_KWS = { SUITE: 1, TEST: 1, HELPER: 1, SETUP: 1, TEARDOWN: 1, DEPENDS: 1, "SUITE-SETUP": 1, "SUITE-TEARDOWN": 1 };
-  var AUX_RE = /\b(FROM|STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|RETRY|INLINE|OPENAPI|XPATH|TIMEOUT|BACKOFF|OPTIONS|AND|OR|bearer|basic|digest|token|oauth2|true|false|form|raw|matches|length|each|contains-all|strict|not)\b/gi;
+  var AUX_RE = /\b(FROM|STATUS|contains-all|contains-only|contains-any|starts-with|ends-with|close-to|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|RETRY|INLINE|OPENAPI|XPATH|TIMEOUT|BACKOFF|OPTIONS|AND|OR|BECAUSE|bearer|basic|digest|token|oauth2|true|false|form|raw|matches|length|each|between|empty|unique|strict|not)\b/gi;
   var METHOD_RE = /\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b/g;
   var VALUE_RE = /("(?:\\.|[^"\\])*")|(\$\{[^}]+\})|(\$\.[^\s]+)|(==|!=)|(\b\d+(?:\.\d+)?(?:ms|s)?\b)/g;
   var PYTHON_KW_RE = /\b(def|return|import|from|as|class|if|elif|else|for|in|assert|True|False|None|with|pass|not|and|or|lambda|yield|try|except)\b/g;

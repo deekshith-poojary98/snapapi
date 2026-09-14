@@ -24,7 +24,7 @@
   });
 
   function currentKey() {
-    return sample.value || "list";
+    return sample.value || "hello";
   }
 
   function setSource(text) {
@@ -125,6 +125,7 @@
     }
   });
 
-  setSource(originals.list);
+  sample.value = "hello";
+  setSource(originals.hello);
   runSuite();
 })();

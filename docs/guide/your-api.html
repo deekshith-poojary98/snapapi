@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
+  <title>Your API — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
+        <a href="../index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a class="active" href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
+        <a href="cli.html">CLI</a>
+        <a href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
+        <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">URL: is the origin you already curl.</p>
+    </aside>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
+      <p class="kicker">Learn</p>
+      <h1>Point SnapAPI at your API</h1>
+      <p class="lede">Swap the mock for the origin you already curl. Same file, real <code>URL:</code>.</p>
+
+      <h2>Start from a curl that works</h2>
+      <p>If this works:</p>
+      <pre><code class="language-bash">curl -sS https://api.myapp.com/users \
+  -H "Authorization: Bearer $TOKEN"</code></pre>
+      <p>convert it:</p>
+      <pre><code class="language-bash">snapapi convert 'curl -sS https://api.myapp.com/users -H "Authorization: Bearer $TOKEN"' -o my.sapi</code></pre>
+      <p>that’s this suite:</p>
+      <pre><code class="language-snaptest">SUITE: Converted Request
+URL: https://api.myapp.com
+
+TEST: Get Users
+  GET: /users
+  AUTH: bearer ${TOKEN}</code></pre>
+      <pre><code class="language-bash">snapapi my.sapi -D TOKEN="$TOKEN"</code></pre>
+      <p>Then add <code>EXPECT</code>, <code>SAVE</code>, and helpers. Curl is the on-ramp; SnapAPI is the maintainable test. It will not import a full Karate/Postman suite — only the requests you already curl.</p>
+      <p>The rest maps the obvious way:</p>
+      <table>
+        <thead><tr><th>curl</th><th>SnapAPI</th></tr></thead>
+        <tbody>
+          <tr><td><code>https://host</code> in the URL</td><td><code>URL: https://host</code> (no path)</td></tr>
+          <tr><td><code>-X POST</code> and the path</td><td><code>POST: /that/path</code></td></tr>
+          <tr><td><code>-H "Authorization: Bearer …"</code></td><td><code>AUTH: bearer ${TOKEN}</code></td></tr>
+          <tr><td><code>-H "Content-Type: application/json"</code></td><td><code>HEADER Content-Type: application/json</code></td></tr>
+          <tr><td><code>-d '{"name":"Jane"}'</code></td><td><code>BODY: {"name": "Jane"}</code></td></tr>
+          <tr><td>status you already know is success</td><td><code>EXPECT: status == 201</code></td></tr>
+        </tbody>
+      </table>
+      <div class="callout warn"><code>https://api.example.com</code> in the DSL reference is a placeholder. It isn’t a live demo. Use the host you actually curl.</div>
+      <h2>When it fails</h2>
+      <ul>
+        <li>Connection errors are DNS, TLS, or nothing listening — same as curl.</li>
+        <li>Wrong path or method is usually <code>404</code> / <code>405</code> from that server.</li>
+        <li>Missing <code>${TOKEN}</code> is SnapAPI’s <code>Undefined variable</code>. A bad token is the API’s <code>401</code>.</li>
+        <li>Playground Live fetch uses the browser. Lots of APIs have no CORS, so curl/CLI work and the tab doesn’t.</li>
+      </ul>
+      <p>Green on your laptop → same command in <a href="ci.html">CI</a>. Common misses: <a href="troubleshooting.html">Troubleshooting</a>.</p>
+      <div class="page-nav">
+        <a href="helpers.html" rel="prev"><span>Previous</span><strong>Helpers</strong></a>
+        <a href="dsl.html" rel="next"><span>Next</span><strong>DSL reference</strong></a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

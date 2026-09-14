@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
+  <title>Troubleshooting — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
+        <a href="../index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
+        <a href="cli.html">CLI</a>
+        <a href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
+        <a href="vscode.html">VS Code</a>
+        <a class="active" href="troubleshooting.html">Troubleshooting</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">Most first-run failures are venv, mock, or the wrong file.</p>
+    </aside>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
+      <p class="kicker">Reference</p>
+      <h1>Troubleshooting</h1>
+      <p class="lede">A failed EXPECT means the test failed — that’s working. This page is for “nothing is listening” and “I ran the wrong file.”</p>
+
+      <h2>Two terminals</h2>
+      <p>Quick start and POST use one terminal for <code>snapapi mock</code> and another for <code>snapapi file.sapi</code>. Activate the venv in both. A new tab doesn’t inherit it.</p>
+
+      <table>
+        <thead><tr><th>You see</th><th>What it means</th><th>What to do</th></tr></thead>
+        <tbody>
+          <tr><td><code>command not found: snapapi</code></td><td>This shell has no venv (or the package is not installed).</td><td><code>source .venv/bin/activate</code> (Windows: <code>.venv\Scripts\activate</code>), then <code>pip install pysnapapi</code>. Confirm with <code>snapapi --version</code>.</td></tr>
+          <tr><td><code>externally-managed-environment</code></td><td>pip refused to install into system Python.</td><td>Create a venv first. See <a href="install.html">Install</a>.</td></tr>
+          <tr><td>Wrong project after <code>pip install snapapi</code></td><td>That name is a different PyPI package.</td><td>Uninstall it. Install <code>pysnapapi</code>. The command is still <code>snapapi</code>.</td></tr>
+          <tr><td><code>Connection refused</code> / <code>ERR</code></td><td>Nothing is listening on that port.</td><td>Start <code>snapapi mock mock.json --port 8765</code> in the other terminal. Match <code>URL:</code> to that port.</td></tr>
+          <tr><td>HTML 404 from <code>SimpleHTTP</code></td><td>Port 8765 is some other Python server.</td><td>Stop it, or use <code>--port 9876</code> and change <code>URL:</code>.</td></tr>
+          <tr><td><code>Status code expected 200, got 404</code> on hello</td><td>HTTP reached a server that has no <code>/users</code>.</td><td>You are not hitting the hello <code>mock.json</code>. Check the port.</td></tr>
+          <tr><td><code>Status code expected 201, got 404</code> on POST</td><td>The hello mock is still running. It has no POST route.</td><td>Stop it. Start <code>examples/users/mock.json</code> (or the mock pasted on the <a href="post.html">POST</a> page).</td></tr>
+          <tr><td><code>Status code expected 201, got 200</code></td><td>The request worked. EXPECT does not match the response.</td><td>Failed test. Fix EXPECT or the server. Not an install problem.</td></tr>
+          <tr><td><code>Undefined variable ${TOKEN}</code></td><td>No value for that name.</td><td><code>-D TOKEN=secret</code>, or a <code>.env</code> file. The playground seeds TOKEN; the CLI does not. Hello world has no <code>${}</code> — you opened a different suite.</td></tr>
+          <tr><td><code>Undefined variable ${userId}</code></td><td>SAVE did not run, or the JSONPath missed.</td><td>Need <code>SAVE: userId FROM $.id</code> (or <code>$.data.id</code>) on a successful POST before you GET <code>/users/${userId}</code>.</td></tr>
+          <tr><td>You wrote two <code>TEST</code>s but the summary says <code>1 passed</code></td><td>The first test is named in <code>SETUP:</code>, so it is treated as a helper.</td><td>Use <code>HELPER:</code> for setup. See <a href="helpers.html">Helpers</a>.</td></tr>
+          <tr><td><code>No such file or directory</code> / exit <code>2</code></td><td>Wrong path or folder.</td><td>Run from the folder that contains the <code>.sapi</code> file. <code>tests/offline.snaptest</code> is at <code>tests/fixtures/offline.snaptest</code>.</td></tr>
+          <tr><td><code>Unknown keyword</code> / exit <code>2</code></td><td>Typo. Keywords are one token.</td><td>Fix the line. <code>GET :</code> with a space is not <code>GET:</code>.</td></tr>
+          <tr><td><code>Unknown helper ${hmac()}</code> / <code>Unknown extension hmac()</code></td><td>Not a built-in, and no matching function in <code>extensions/</code>.</td><td>Add <code>extensions/crypto.py</code> and <code>CALL: signature = crypto.generate_signature(${PAYLOAD}, ${HMAC_SECRET})</code>. Don’t add <code>IF</code> / <code>FOR</code> to the file.</td></tr>
+          <tr><td><code>CALL FAILED</code></td><td>The Python function raised, returned <code>None</code>, returned a disallowed type, or was <code>async</code>.</td><td>Fix the function in <code>extensions/</code>. The block names the function and the exception text. There is no traceback on purpose.</td></tr>
+          <tr><td>A request from a plugin isn’t in the report</td><td>You issued HTTP from Python. That bypasses SnapAPI’s HTTP engine.</td><td>Put the call in the <code>.sapi</code> file: <code>POST: /users</code>. <code>CALL</code> is for computation, not for driving the system under test. See <a href="plugins.html#compute">CALL</a>.</td></tr>
+          <tr><td>Flakes only with <code>--workers</code></td><td>A plugin used module-level mutable state. Those globals are shared across workers.</td><td>Make the function thread-safe, or don’t share globals. SnapAPI does not isolate Python modules. See <a href="plugins.html#state">three kinds of state</a>.</td></tr>
+          <tr><td>Playground Live fetch fails, curl works</td><td>The browser enforces CORS.</td><td>Use the CLI for real hosts. Mock mode never leaves the tab.</td></tr>
+        </tbody>
+      </table>
+      <h2>Editor</h2>
+      <p>The language pack isn’t on the Marketplace. Install it from the repo — <a href="vscode.html">VS Code</a>.</p>
+      <div class="page-nav">
+        <a href="vscode.html" rel="prev"><span>Previous</span><strong>VS Code</strong></a>
+        <a href="../playground.html" rel="next"><span>Next</span><strong>Playground</strong></a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

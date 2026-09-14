@@ -58,8 +58,9 @@ def write_junit_report(payload, path):
             )
             status = test.get("status")
             if status == "failed":
-                failure = ET.SubElement(case, "failure", message=_xml_text(test.get("error") or "failed"))
-                failure.text = _xml_text(test.get("error") or "failed")
+                error = test.get("error") or "failed"
+                failure = ET.SubElement(case, "failure", message=_xml_text(error.splitlines()[0]))
+                failure.text = _xml_text(error)
             elif status == "skipped":
                 ET.SubElement(case, "skipped")
 

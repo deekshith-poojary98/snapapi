@@ -3,32 +3,50 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
   <title>CI / reports — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="layout">
-    <aside class="sidebar">
-      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
-      <div class="nav-label">Guide</div>
-      <nav>
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
         <a href="../index.html">Home</a>
-        <a href="../index.html#why">Why SnapAPI?</a>
         <a href="install.html">Install</a>
         <a href="quick-start.html">Quick start</a>
-        <a href="dsl.html">DSL reference</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
         <a href="cli.html">CLI</a>
-        <a class="active" href="ci.html">CI / reports</a>
+        <a href="plugins.html">Plugins</a>
+        <a class="active" href="ci.html">CI</a>
         <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a class="cta" href="../playground.html">Playground</a>
       </nav>
-      <p class="hint">JUnit for the test UI, HTML for humans, VCR when the network should stay off.</p>
+      <p class="hint">Same CLI in CI. Start with lint plus a mock or recorded cassette.</p>
     </aside>
-    <main class="content">
-      <button class="menu-btn btn btn-ghost" type="button" data-menu>Menu</button>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
       <p class="kicker">CI</p>
       <h1>CI, reports, and VCR</h1>
-      <p class="lede">Treat SnapAPI like any other test runner: install in a venv, point it at <code>.sapi</code> files, publish artifacts, and keep outbound URLs honest.</p>
+      <p class="lede">Same <code>snapapi</code> you run locally. Install in a venv, point it at the suites, publish the reports.</p>
 
       <h2>Example job</h2>
       <pre><code class="language-bash">python3 -m venv .venv
@@ -53,9 +71,9 @@ snapapi tests \
 
       <h2>VCR cassettes</h2>
       <p>Cassettes live under <code>.snapapi/cassettes/</code>. Keys include method, path, and (by default) sorted query string, <code>Content-Type</code> / <code>Accept</code>, and body.</p>
-      <pre><code class="language-bash">snapapi tests/offline.snaptest --mode record
-snapapi tests/offline.snaptest --mode replay
-snapapi tests/offline.snaptest --mode record-on-miss</code></pre>
+      <pre><code class="language-bash">snapapi tests/fixtures/offline.snaptest --mode record
+snapapi tests/fixtures/offline.snaptest --mode replay
+snapapi tests/fixtures/offline.snaptest --mode record-on-miss</code></pre>
       <ul>
         <li><code>record</code> hits the network and writes cassettes.</li>
         <li><code>replay</code> never hits the network; a missing cassette is an error unless <code>--record-on-miss</code>.</li>
@@ -64,17 +82,17 @@ snapapi tests/offline.snaptest --mode record-on-miss</code></pre>
       <p>Override identity fields with <code>--vcr-match authorization,query</code> or suite <code>OPTIONS: {"VCR-MATCH": ["query","body","accept","authorization"]}</code>. Replay restores <code>Set-Cookie</code> onto the session. Commit cassettes for offline CI; do not commit secrets — HTML reports and dumps redact sensitive fields, but review cassette JSON before you push.</p>
 
       <h2><code>--safe-url</code></h2>
-      <p>Blocks private and metadata hosts (loopback, RFC1918, link-local, cloud metadata). Use it in CI when suites interpolate <code>${URL}</code> from the environment so a typo cannot scan the job network. Combine with an allow-listed public API or a mock that the job itself starts:</p>
-      <pre><code class="language-bash">snapapi mock tests/fixtures/mock.json --port 8765 &amp;
-export BASE_URL=http://127.0.0.1:8765
-snapapi tests/recommended.snaptest</code></pre>
-      <p>Local mocks are private URLs; do not pass <code>--safe-url</code> against them unless you also pass <code>--allow-private-urls</code>. For third-party APIs in CI, <code>--safe-url</code> is the right default.</p>
+      <p><code>--safe-url</code> blocks private and metadata hosts (loopback, RFC1918, link-local, cloud metadata). Use it in CI when <code>${URL}</code> comes from the environment. Pair it with a public API, or a mock the job starts:</p>
+      <pre><code class="language-bash">snapapi mock examples/hello/mock.json --port 8765 &amp;
+snapapi examples/hello/hello.sapi</code></pre>
+      <p><code>tests/recommended.snaptest</code> isn’t this hello mock. It wants <code>${BASE_URL}</code> and extra routes — pytest fills those in this repo. Don’t pair it with <code>tests/fixtures/mock.json</code> (that file only serves <code>GET /ping</code>).</p>
+      <p>Local mocks are private URLs, so skip <code>--safe-url</code> unless you also pass <code>--allow-private-urls</code>. For third-party APIs in CI, <code>--safe-url</code> is the right default.</p>
 
       <h2>This repository</h2>
-      <p>Automated checks in this repo use a local mock HTTP server and do not call public APIs. A checked-in cassette covers the offline fixture. CI should run <code>snapapi lint</code> on your suites and <code>snapapi</code> with <code>--mode replay</code> when cassettes are committed.</p>
+      <p>Our own CI uses a local mock and doesn’t call public APIs. There’s a checked-in cassette for the offline fixture. For your suites: <code>snapapi lint</code>, then <code>snapapi</code> with <code>--mode replay</code> if you commit cassettes.</p>
       <div class="page-nav">
-        <a href="cli.html"><span>Previous</span>CLI</a>
-        <a href="vscode.html"><span>Next</span>VS Code</a>
+        <a href="plugins.html" rel="prev"><span>Previous</span><strong>Plugins</strong></a>
+        <a href="vscode.html" rel="next"><span>Next</span><strong>VS Code</strong></a>
       </div>
     </main>
   </div>

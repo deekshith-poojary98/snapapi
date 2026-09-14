@@ -56,10 +56,18 @@ function testDetect() {
   assert(hl.detectLanguage("snapapi tests/ --safe-url", "") === "bash", "detect bash");
 }
 
+function testNewExpectOps() {
+  const html = hl.highlightSnaptest('EXPECT: json $.items empty BECAUSE "reason"\nEXPECT: json $.tags contains-only ["a"]');
+  assert(/class="tok-aux">empty</.test(html), "empty aux:\n" + html);
+  assert(/class="tok-aux">BECAUSE</.test(html), "BECAUSE aux:\n" + html);
+  assert(/contains-only/.test(html), "contains-only:\n" + html);
+}
+
 testKeywords();
 testTokens();
 testEscape();
 testRequestMethod();
 testBoolOps();
 testDetect();
+testNewExpectOps();
 console.log("highlight ok");

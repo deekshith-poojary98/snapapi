@@ -1,0 +1,13 @@
+{
+  "warnings": [],
+  "must_contain": [
+    "BODY: form user=jane&pass=secret"
+  ],
+  "semantic": {
+    "method": "POST",
+    "endpoint": "/login",
+    "body_type": "form",
+    "body": {"user": "jane", "pass": "secret"},
+    "headers": {"Content-Type": "application/x-www-form-urlencoded"}
+  }
+}

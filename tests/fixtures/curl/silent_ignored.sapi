@@ -1,0 +1,5 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Get Ok
+  GET: /ok

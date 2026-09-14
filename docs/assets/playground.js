@@ -26,6 +26,7 @@
     IMPORT: "IMPORT is not available in the playground. Paste the tests into this editor, or use the CLI.",
     SKIP: "SKIP is not available in the playground. Comment the test out, or use the CLI.",
     ONLY: "ONLY is not available in the playground. Delete the other tests, or use the CLI.",
+    CALL: "CALL is not available in the playground. Use the SnapAPI CLI with extensions/.",
     QUARANTINE: "QUARANTINE is not available in the playground. Use the SnapAPI CLI.",
   };
   var LINE_KEYWORD_RE = /^([A-Z][A-Z0-9_-]*):(.*)$/;
@@ -115,6 +116,70 @@
     } catch (err) {
       return stripQuotes(raw);
     }
+  }
+
+  function isUnquotedIndex(text, index) {
+    var quote = null;
+    var escape = false;
+    for (var i = 0; i < text.length && i < index; i++) {
+      var ch = text.charAt(i);
+      if (quote) {
+        if (escape) escape = false;
+        else if (ch === "\\") escape = true;
+        else if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") quote = ch;
+    }
+    return quote == null;
+  }
+
+  function lastUnquotedMatch(text, re) {
+    var last = null;
+    var flags = re.flags.indexOf("g") >= 0 ? re.flags : re.flags + "g";
+    var globalRe = new RegExp(re.source, flags);
+    var match;
+    while ((match = globalRe.exec(text))) {
+      var ws = match[0].length - match[0].replace(/^\s+/, "").length;
+      if (isUnquotedIndex(text, match.index + ws)) last = match;
+      if (match.index === globalRe.lastIndex) globalRe.lastIndex += 1;
+    }
+    return last;
+  }
+
+  function takeBecause(rest) {
+    var match = lastUnquotedMatch(rest, /\sBECAUSE\s+("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)\s*$/i);
+    if (!match) return { rest: rest, because: null };
+    return { rest: rest.slice(0, match.index).trim(), because: stripQuotes(match[1].trim()) };
+  }
+
+  function takeRetry(rest) {
+    var match = rest.match(/\sRETRY\s+(\d+)(?:\s+ON\s+(\S+))?(?:\s+BACKOFF\s+(\S+))?\s*$/i);
+    if (!match) return { rest: rest, match: null };
+    var ws = match[0].length - match[0].replace(/^\s+/, "").length;
+    if (!isUnquotedIndex(rest, match.index + ws)) return { rest: rest, match: null };
+    return { rest: rest.slice(0, match.index).trim(), match: match };
+  }
+
+  function stripExpectSuffixes(rest) {
+    var retryMatch = null;
+    var because = null;
+    while (rest) {
+      var retryTaken = takeRetry(rest);
+      if (retryTaken.match) {
+        rest = retryTaken.rest;
+        retryMatch = retryTaken.match;
+        continue;
+      }
+      var becauseTaken = takeBecause(rest);
+      if (becauseTaken.because != null) {
+        rest = becauseTaken.rest;
+        because = becauseTaken.because;
+        continue;
+      }
+      break;
+    }
+    return { rest: rest, retryMatch: retryMatch, because: because };
   }
 
   function parseDurationSeconds(raw) {
@@ -241,17 +306,18 @@
 
   function parseExpect(rest, lineno) {
     if (!rest) throw new ParseError("EXPECT requires a check", lineno);
+    var stripped = stripExpectSuffixes(rest);
+    rest = stripped.rest;
     var retry = null;
     var retryBackoff = null;
-    var retryMatch = rest.match(/\sRETRY\s+(\d+)(?:\s+ON\s+(\S+))?(?:\s+BACKOFF\s+(\S+))?\s*$/i);
-    if (retryMatch) {
-      retry = parseInt(retryMatch[1], 10);
-      if (retryMatch[3]) retryBackoff = parseDurationSeconds(retryMatch[3]);
-      rest = rest.slice(0, retryMatch.index).trim();
+    if (stripped.retryMatch) {
+      retry = parseInt(stripped.retryMatch[1], 10);
+      if (stripped.retryMatch[3]) retryBackoff = parseDurationSeconds(stripped.retryMatch[3]);
     }
     var node = parseExpectExpr(rest, lineno);
     node.retry = retry;
     node.retryBackoff = retryBackoff;
+    if (stripped.because) node.because = stripped.because;
     return node;
   }
 
@@ -359,6 +425,8 @@
   }
 
   function parseExpectAtomic(rest, lineno) {
+    var becauseTaken = takeBecause(rest);
+    rest = becauseTaken.rest;
     var kindMatch = rest.match(/^(STATUS|CONTAINS|JSON|HEADER|BODY|SCHEMA|DURATION|OPENAPI|XPATH)(?:\s+|(?==)|$)(.*)$/i);
     if (!kindMatch) {
       var kind = rest.split(/\s+/)[0];
@@ -394,33 +462,96 @@
     } else if (expectKind === "CONTAINS" || expectKind === "BODY") {
       var negated = false;
       var containsValue = remainder;
+      var bodyOp = "CONTAINS";
       if (expectKind === "BODY") {
-        var bm = remainder.match(/^(not\s+)?contains\s+(.+)$/i);
-        if (!bm) throw new ParseError("EXPECT body must look like: body contains <text>", lineno);
-        negated = !!bm[1];
-        containsValue = bm[2].trim();
+        var unary = remainder.match(/^(not\s+)?empty\s*$/i);
+        var bm = remainder.match(/^(not\s+)?(contains|matches|starts-with|ends-with)\s+(.+)$/i);
+        if (unary) {
+          negated = !!unary[1];
+          bodyOp = negated ? "NOT EMPTY" : "EMPTY";
+          containsValue = "";
+        } else if (bm) {
+          negated = !!bm[1];
+          bodyOp = bm[2].toUpperCase();
+          if ((bodyOp === "CONTAINS" || bodyOp === "MATCHES") && negated) bodyOp = "NOT " + bodyOp;
+          else if (negated) throw new ParseError("EXPECT body must look like: body contains <text>", lineno);
+          containsValue = bm[3].trim();
+        } else {
+          throw new ParseError("EXPECT body must look like: body contains <text>", lineno);
+        }
       } else if (/^not\s+contains/i.test(remainder)) {
         negated = true;
         containsValue = remainder.replace(/^not\s+contains\s*/i, "");
       }
-      if (!containsValue) throw new ParseError("EXPECT CONTAINS requires a value", lineno);
+      if ((bodyOp === "CONTAINS" || bodyOp === "MATCHES" || bodyOp === "NOT CONTAINS" || bodyOp === "NOT MATCHES" || bodyOp === "STARTS-WITH" || bodyOp === "ENDS-WITH") && !containsValue) {
+        throw new ParseError("EXPECT CONTAINS requires a value", lineno);
+      }
       check.type = "CONTAINS";
-      check.value = stripQuotes(containsValue);
+      check.operator = bodyOp;
+      check.value = containsValue ? stripQuotes(containsValue) : "";
       check.negated = negated;
     } else if (expectKind === "JSON") {
       var lengthMatch = remainder.match(/^(\S+)\s+length\s+(==|!=|>=|<=|>|<)\s+(.+)$/i);
-      var containsAllMatch = remainder.match(/^(.+?)\s+contains(?:-|\s+)all\s+(.+)$/i);
+      var containsSetMatch = remainder.match(/^(.+?)\s+contains(?:-|\s+)(all|only|any)\s+(.+)$/i);
+      var notMatchesMatch = remainder.match(/^(.+?)\s+not\s+matches\s+(.+)$/i);
+      var affixMatch = remainder.match(/^(.+?)\s+(starts-with|ends-with)\s+(.+)$/i);
+      var closeToMatch = remainder.match(/^(.+?)\s+close-to\s+(\S+)\s+(?:delta|±|\+\/-)\s+(\S+)\s*$/i);
+      var betweenMatch = remainder.match(/^(.+?)\s+between\s+(\S+)\s+(\S+)\s*$/i);
+      var typeMatch = remainder.match(/^(.+?)\s+type\s+(\S+)\s*$/i);
+      var unaryMatch = remainder.match(/^(.+?)\s+(not\s+empty|empty|unique)\s*$/i);
+      var inMatch = remainder.match(/^(.+?)\s+in\s+(.+)$/i);
       var jsonMatch = remainder.match(/^(\S+)\s+(==|!=|CONTAINS|MATCHES|>=|<=|>|<)\s+(.+)$/i);
       if (lengthMatch) {
         check.type = "JSON";
         check.path = lengthMatch[1];
         check.operator = "length " + lengthMatch[2];
         check.value = parseExpectValue(lengthMatch[3].trim());
-      } else if (containsAllMatch) {
+      } else if (containsSetMatch) {
         check.type = "JSON";
-        check.path = containsAllMatch[1].trim();
-        check.operator = "CONTAINS-ALL";
-        check.value = parseExpectValue(containsAllMatch[2].trim());
+        check.path = containsSetMatch[1].trim();
+        check.operator = "CONTAINS-" + containsSetMatch[2].toUpperCase();
+        check.value = parseExpectValue(containsSetMatch[3].trim());
+      } else if (notMatchesMatch) {
+        check.type = "JSON";
+        check.path = notMatchesMatch[1].trim();
+        check.operator = "NOT MATCHES";
+        check.value = parseExpectValue(notMatchesMatch[2].trim());
+      } else if (affixMatch) {
+        check.type = "JSON";
+        check.path = affixMatch[1].trim();
+        check.operator = affixMatch[2].toUpperCase();
+        check.value = parseExpectValue(affixMatch[3].trim());
+      } else if (closeToMatch) {
+        check.type = "JSON";
+        check.path = closeToMatch[1].trim();
+        check.operator = "CLOSE-TO";
+        check.value = parseExpectValue(closeToMatch[2].trim());
+        check.delta = parseExpectValue(closeToMatch[3].trim());
+      } else if (betweenMatch) {
+        check.type = "JSON";
+        check.path = betweenMatch[1].trim();
+        check.operator = "BETWEEN";
+        check.value = [parseExpectValue(betweenMatch[2].trim()), parseExpectValue(betweenMatch[3].trim())];
+      } else if (typeMatch) {
+        var typeName = typeMatch[2].trim().toLowerCase();
+        var allowedTypes = { string: 1, number: 1, array: 1, object: 1, boolean: 1, "null": 1 };
+        if (!allowedTypes[typeName]) {
+          throw new ParseError("EXPECT JSON type must be string, number, array, object, boolean, or null", lineno);
+        }
+        check.type = "JSON";
+        check.path = typeMatch[1].trim();
+        check.operator = "TYPE";
+        check.value = typeName;
+      } else if (unaryMatch) {
+        check.type = "JSON";
+        check.path = unaryMatch[1].trim();
+        check.operator = unaryMatch[2].replace(/\s+/g, " ").toUpperCase();
+        check.value = null;
+      } else if (inMatch) {
+        check.type = "JSON";
+        check.path = inMatch[1].trim();
+        check.operator = "IN";
+        check.value = parseExpectValue(inMatch[2].trim());
       } else if (jsonMatch) {
         var jop = jsonMatch[2];
         check.type = "JSON";
@@ -431,13 +562,23 @@
         throw new ParseError('EXPECT JSON must look like: JSON $.path == "value"', lineno);
       }
     } else if (expectKind === "HEADER") {
-      var hm = remainder.match(/^(\S+)\s+(==|!=|CONTAINS)\s+(.+)$/i);
-      if (!hm) throw new ParseError("EXPECT HEADER must look like: HEADER Content-Type CONTAINS json", lineno);
-      check.type = "HEADER";
-      check.name = hm[1];
-      check.operator = hm[2].toUpperCase() === "CONTAINS" ? "CONTAINS" : hm[2];
-      check.value = stripQuotes(hm[3].trim());
+      var hunary = remainder.match(/^(\S+)\s+(not\s+empty|empty)\s*$/i);
+      var hm = remainder.match(/^(\S+)\s+(==|!=|CONTAINS|NOT\s+MATCHES|MATCHES|STARTS-WITH|ENDS-WITH|IN)\s+(.+)$/i);
+      if (hunary) {
+        check.type = "HEADER";
+        check.name = hunary[1];
+        check.operator = hunary[2].replace(/\s+/g, " ").toUpperCase();
+        check.value = "";
+      } else {
+        if (!hm) throw new ParseError("EXPECT HEADER must look like: HEADER Content-Type CONTAINS json", lineno);
+        var hop = hm[2].replace(/\s+/g, " ").toUpperCase();
+        check.type = "HEADER";
+        check.name = hm[1];
+        check.operator = hop === "CONTAINS" || hop === "MATCHES" || hop === "NOT MATCHES" || hop === "STARTS-WITH" || hop === "ENDS-WITH" || hop === "IN" ? hop : hm[2];
+        check.value = hop === "IN" ? parseExpectValue(hm[3].trim()) : stripQuotes(hm[3].trim());
+      }
     }
+    if (becauseTaken.because) check.because = becauseTaken.because;
     return check;
   }
 
@@ -1026,29 +1167,147 @@
     if (!ok) throw new Error(label + " expected " + op + " " + expected + ", got " + actual);
   }
 
-  function assertJsonValue(actual, operator, expected, label) {
-    if (operator === "==") {
+  function asList(value) {
+    return Array.isArray(value) ? value : [value];
+  }
+
+  function normOp(operator) {
+    return String(operator || "").replace(/\s+/g, " ").trim().toUpperCase();
+  }
+
+  function isEmpty(value) {
+    if (value == null) return true;
+    if (typeof value === "string" || Array.isArray(value)) return value.length === 0;
+    if (value && typeof value === "object") return Object.keys(value).length === 0;
+    return false;
+  }
+
+  function jsonTypeName(value) {
+    if (value === null) return "null";
+    if (Array.isArray(value)) return "array";
+    var t = typeof value;
+    if (t === "string") return "string";
+    if (t === "number") return "number";
+    if (t === "boolean") return "boolean";
+    if (t === "object") return "object";
+    return t;
+  }
+
+  function sameSet(left, right) {
+    var leftItems = asList(left);
+    var rightItems = asList(right);
+    function has(list, item) {
+      for (var i = 0; i < list.length; i++) {
+        if (list[i] === item) return true;
+      }
+      return false;
+    }
+    for (var i = 0; i < leftItems.length; i++) if (!has(rightItems, leftItems[i])) return false;
+    for (var j = 0; j < rightItems.length; j++) if (!has(leftItems, rightItems[j])) return false;
+    return true;
+  }
+
+  function assertValue(actual, operator, expected, label, delta) {
+    var op = normOp(operator);
+    if (op === "==") {
       if (actual !== expected) throw new Error(label + " expected " + JSON.stringify(expected) + ", got " + JSON.stringify(actual));
-    } else if (operator === "!=") {
+    } else if (op === "!=") {
       if (actual === expected) throw new Error(label + " expected not " + JSON.stringify(expected) + ", got " + JSON.stringify(actual));
-    } else if (String(operator).toUpperCase() === "CONTAINS") {
+    } else if (op === "CONTAINS") {
       if (Array.isArray(actual)) {
         if (actual.indexOf(expected) === -1) throw new Error(label + " value " + JSON.stringify(actual) + " does not contain " + JSON.stringify(expected));
       } else if (String(actual).indexOf(String(expected)) === -1) {
         throw new Error(label + " value " + JSON.stringify(actual) + " does not contain " + JSON.stringify(expected));
       }
-    } else if (String(operator).toUpperCase() === "MATCHES") {
+    } else if (op === "NOT CONTAINS") {
+      if (Array.isArray(actual)) {
+        if (actual.indexOf(expected) !== -1) throw new Error(label + " value " + JSON.stringify(actual) + " unexpectedly contains " + JSON.stringify(expected));
+      } else if (String(actual).indexOf(String(expected)) !== -1) {
+        throw new Error(label + " value " + JSON.stringify(actual) + " unexpectedly contains " + JSON.stringify(expected));
+      }
+    } else if (op === "MATCHES") {
       if (!new RegExp(String(expected)).test(String(actual))) {
         throw new Error(label + " value " + JSON.stringify(actual) + " does not match " + JSON.stringify(expected));
       }
-    } else if ("> >= < <=".indexOf(operator) !== -1) {
+    } else if (op === "NOT MATCHES") {
+      if (new RegExp(String(expected)).test(String(actual))) {
+        throw new Error(label + " value " + JSON.stringify(actual) + " unexpectedly matches " + JSON.stringify(expected));
+      }
+    } else if (op === "STARTS-WITH") {
+      if (String(actual).indexOf(String(expected)) !== 0) {
+        throw new Error(label + " value " + JSON.stringify(actual) + " does not start with " + JSON.stringify(expected));
+      }
+    } else if (op === "ENDS-WITH") {
+      if (String(actual).slice(-String(expected).length) !== String(expected)) {
+        throw new Error(label + " value " + JSON.stringify(actual) + " does not end with " + JSON.stringify(expected));
+      }
+    } else if (op === "EMPTY") {
+      if (!isEmpty(actual)) throw new Error(label + " expected empty, got " + JSON.stringify(actual));
+    } else if (op === "NOT EMPTY") {
+      if (isEmpty(actual)) throw new Error(label + " is unexpectedly empty");
+    } else if (op === "UNIQUE") {
+      if (!Array.isArray(actual)) throw new Error(label + " unique requires an array, got " + JSON.stringify(actual));
+      var seen = [];
+      var dupes = [];
+      for (var u = 0; u < actual.length; u++) {
+        if (seen.indexOf(actual[u]) !== -1 && dupes.indexOf(actual[u]) === -1) dupes.push(actual[u]);
+        seen.push(actual[u]);
+      }
+      if (dupes.length) throw new Error(label + " expected unique values, got duplicates " + JSON.stringify(dupes) + " in " + JSON.stringify(actual));
+    } else if (op === "TYPE") {
+      var actualType = jsonTypeName(actual);
+      if (actualType !== String(expected).toLowerCase()) {
+        throw new Error(label + " expected type " + expected + ", got " + actualType + " (" + JSON.stringify(actual) + ")");
+      }
+    } else if (op === "IN") {
+      var options = asList(expected);
+      if (options.indexOf(actual) === -1) throw new Error(label + " value " + JSON.stringify(actual) + " not in " + JSON.stringify(expected));
+    } else if (op === "CONTAINS-ALL") {
+      if (!Array.isArray(actual)) throw new Error(label + " contains-all requires an array, got " + JSON.stringify(actual));
+      var missing = asList(expected).filter(function (item) { return actual.indexOf(item) === -1; });
+      if (missing.length) throw new Error(label + " value " + JSON.stringify(actual) + " does not contain all of " + JSON.stringify(expected) + " (missing " + JSON.stringify(missing) + ")");
+    } else if (op === "CONTAINS-ONLY") {
+      if (!Array.isArray(actual)) throw new Error(label + " contains-only requires an array, got " + JSON.stringify(actual));
+      if (!sameSet(actual, expected)) throw new Error(label + " value " + JSON.stringify(actual) + " is not the set " + JSON.stringify(asList(expected)));
+    } else if (op === "CONTAINS-ANY") {
+      var wanted = asList(expected);
+      var found = Array.isArray(actual)
+        ? wanted.some(function (item) { return actual.indexOf(item) !== -1; })
+        : wanted.some(function (item) { return String(actual).indexOf(String(item)) !== -1; });
+      if (!found) throw new Error(label + " value " + JSON.stringify(actual) + " does not contain any of " + JSON.stringify(expected));
+    } else if (op === "BETWEEN") {
+      var bounds = asList(expected);
+      if (bounds.length !== 2) throw new Error(label + " between requires two numbers, got " + JSON.stringify(expected));
+      var num = Number(actual);
+      var low = Number(bounds[0]);
+      var high = Number(bounds[1]);
+      if (!(low <= num && num <= high)) throw new Error(label + " expected between " + low + " and " + high + ", got " + num);
+    } else if (op === "CLOSE-TO") {
+      var value = Number(actual);
+      var target = Number(expected);
+      var tolerance = Number(delta);
+      if (!(Math.abs(value - target) <= tolerance)) throw new Error(label + " expected " + target + " ± " + tolerance + ", got " + value);
+    } else if ("> >= < <=".indexOf(op) !== -1) {
       compare(actual, operator, expected, label);
     } else {
-      throw new Error("Unknown JSON operator " + operator);
+      throw new Error("Unknown operator " + operator);
     }
   }
 
+  function assertJsonValue(actual, operator, expected, label) {
+    assertValue(actual, operator, expected, label);
+  }
+
   function executeCheck(check, response, variables) {
+    try {
+      runCheck(check, response, variables);
+    } catch (err) {
+      if (check.because) throw new Error(check.because + ": " + (err && err.message ? err.message : String(err)));
+      throw err;
+    }
+  }
+
+  function runCheck(check, response, variables) {
     if (check.type === "AND") {
       for (var a = 0; a < (check.terms || []).length; a++) {
         executeCheck(check.terms[a], response, variables);
@@ -1077,39 +1336,49 @@
         throw new Error("Status code expected " + expected + ", got " + actual);
       }
     } else if (check.type === "CONTAINS") {
-      var needle = interpolate(String(check.value), variables);
-      var present = (response.text || "").indexOf(needle) !== -1;
-      if (check.negated) {
-        if (present) throw new Error("Response unexpectedly contains " + needle);
-      } else if (!present) {
-        throw new Error("Response does not contain " + needle);
+      var bodyOp = normOp(check.operator || "CONTAINS");
+      if (check.negated && bodyOp === "CONTAINS") bodyOp = "NOT CONTAINS";
+      var text = response.text || "";
+      if (bodyOp === "CONTAINS" || bodyOp === "NOT CONTAINS") {
+        var needle = interpolate(String(check.value), variables);
+        var present = text.indexOf(needle) !== -1;
+        if (bodyOp === "NOT CONTAINS") {
+          if (present) throw new Error("Response unexpectedly contains " + needle);
+        } else if (!present) {
+          throw new Error("Response does not contain " + needle);
+        }
+      } else {
+        assertValue(text, bodyOp, interpolate(check.value, variables), "Response body");
       }
     } else if (check.type === "JSON") {
       if (response.json == null) throw new Error("Response is not JSON");
       var jpath = interpolate(check.path, variables);
       var got = extract(response.json, jpath);
-      var want = interpolate(check.value, variables);
+      var want = check.value != null ? interpolate(check.value, variables) : null;
       var op = check.operator;
       if (String(op).indexOf("length ") === 0) {
         compare(got.length, op.split(" ")[1], want, "JSON " + jpath + " length");
-      } else if (String(op).toUpperCase() === "CONTAINS-ALL") {
-        var missing = [].concat(want).filter(function (item) { return got.indexOf(item) === -1; });
-        if (missing.length) throw new Error("JSON " + jpath + " does not contain all of " + JSON.stringify(want));
+      } else if (normOp(op) === "CLOSE-TO") {
+        assertValue(got, "CLOSE-TO", want, "JSON " + jpath, interpolate(check.delta, variables));
       } else {
-        assertJsonValue(got, op, want, "JSON " + jpath);
+        assertValue(got, op, want, "JSON " + jpath);
       }
     } else if (check.type === "HEADER") {
       var hname = interpolate(check.name, variables);
-      var hexpected = interpolate(String(check.value), variables);
+      var hop = normOp(check.operator);
       var hactual = headerGet(response.headers, hname);
+      if (hop === "EMPTY" || hop === "NOT EMPTY") {
+        assertValue(hactual == null ? "" : hactual, hop, null, "Header " + hname);
+        return;
+      }
       if (hactual == null) throw new Error("Header " + hname + " missing");
-      var hop = check.operator;
+      var hexpected = interpolate(check.value, variables);
       if (hop === "==") {
         if (hactual !== hexpected) throw new Error("Header " + hname + " expected " + JSON.stringify(hexpected) + ", got " + JSON.stringify(hactual));
       } else if (hop === "!=") {
         if (hactual === hexpected) throw new Error("Header " + hname + " expected not " + JSON.stringify(hexpected));
-      } else if (String(hactual).indexOf(hexpected) === -1) {
-        throw new Error("Header " + hname + " value " + JSON.stringify(hactual) + " does not contain " + hexpected);
+      } else {
+        assertValue(hactual, hop, hexpected, "Header " + hname);
       }
     } else {
       throw new Error("Unknown check type " + check.type);
@@ -1159,7 +1428,7 @@
       if (path === "/health" || path === "/ping") {
         if (m === "GET" || m === "HEAD") return json(200, { ok: true });
       }
-      if (path === "/api/users") {
+      if (path === "/api/users" || path === "/users") {
         if (m === "GET" || m === "HEAD") return json(200, listPayload(query.page));
         if (m === "POST") {
           var payload = body && typeof body === "object" ? body : {};
@@ -1176,7 +1445,7 @@
         }
         if (m === "OPTIONS") return json(204, null);
       }
-      var userMatch = path.match(/^\/api\/users\/([^/]+)$/);
+      var userMatch = path.match(/^\/(?:api\/)?users\/([^/]+)$/);
       if (userMatch) {
         var uid = userMatch[1];
         var numeric = String(parseInt(uid, 10)) === uid ? parseInt(uid, 10) : uid;
@@ -1405,7 +1674,7 @@
     if (live && !isMockUrl(suite.baseUrl)) {
       emit("Live fetch is on — requests go to " + suite.baseUrl + " (CORS may block them).", "warn");
     } else {
-      emit("Using in-memory mock API  (GET/POST /api/users, /health, /jobs/:id)", "dim");
+      emit("Using in-memory mock API  (GET /users or /api/users, /health, /jobs/:id)", "dim");
     }
 
     applySets(suite.sets, variables);
@@ -1467,7 +1736,15 @@
         emit(indent(1) + padRequest(method + " " + dispatched.endpoint) + "  " + response.status + "  " + formatDuration(response.durationMs), statusClass(response.status));
         try {
           if (wait) executeCheck(wait.check, response, variables);
-          for (var c = 0; c < checks.length; c++) executeCheck(checks[c], response, variables);
+          var failures = [];
+          for (var c = 0; c < checks.length; c++) {
+            try {
+              executeCheck(checks[c], response, variables);
+            } catch (checkErr) {
+              failures.push(checkErr.message || String(checkErr));
+            }
+          }
+          if (failures.length) throw new Error(failures.join("\n"));
           for (var s = 0; s < (step.saves || []).length; s++) {
             var saved = saveValue(step.saves[s], response, variables);
             emit(indent(1) + "saved " + step.saves[s].name + "=" + saved, "dim");
@@ -1486,7 +1763,9 @@
           }
         }
       }
-      emit(indent(2) + lastError, "fail");
+      lastError.split("\n").forEach(function (line) {
+        emit(indent(2) + line, "fail");
+      });
       if (lastRecorded && lastRecorded.response) {
         emit(indent(2) + "response:", "dim");
         emit(indent(2) + "  " + (lastRecorded.response.text || "").slice(0, 400), "dim");
@@ -1637,6 +1916,42 @@
   }
 
   var SAMPLES = {
+    hello: {
+      label: "Hello (one GET)",
+      text:
+        "SUITE: Hello API\n" +
+        "URL: mock://api\n" +
+        "\n" +
+        "TEST: Get Users\n" +
+        "  GET: /users\n" +
+        "  EXPECT: status == 200\n",
+    },
+    post: {
+      label: "POST",
+      text:
+        "SUITE: Users\n" +
+        "URL: mock://api\n" +
+        "\n" +
+        "TEST: Create User\n" +
+        "  POST: /users\n" +
+        "  BODY: {\"name\": \"Jane\", \"email\": \"jane@example.com\"}\n" +
+        "  EXPECT: status == 201\n",
+    },
+    save: {
+      label: "SAVE then GET",
+      text:
+        "SUITE: Users\n" +
+        "URL: mock://api\n" +
+        "\n" +
+        "TEST: Create then fetch\n" +
+        "  POST: /users\n" +
+        "  BODY: {\"name\": \"Jane\", \"email\": \"jane@example.com\"}\n" +
+        "  EXPECT: status == 201\n" +
+        "  SAVE: userId FROM $.id\n" +
+        "  GET: /users/${userId}\n" +
+        "  EXPECT: status == 200\n" +
+        "  EXPECT: json $.email == \"jane@example.com\"\n",
+    },
     list: {
       label: "List users",
       text:

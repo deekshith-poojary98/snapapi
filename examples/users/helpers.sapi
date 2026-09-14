@@ -1,0 +1,14 @@
+SUITE: Users
+URL: http://127.0.0.1:8765
+
+HELPER: Create User
+  POST: /users
+  BODY: {"name": "Jane", "email": "jane@example.com"}
+  EXPECT: status == 201
+  SAVE: userId FROM $.id
+
+TEST: Get User
+SETUP: Create User
+  GET: /users/${userId}
+  EXPECT: status == 200
+  EXPECT: json $.email == "jane@example.com"

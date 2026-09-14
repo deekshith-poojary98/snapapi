@@ -1,0 +1,1 @@
+curl https://api.example.com/echo --data-binary 'plain-text-body' -H 'Content-Type: text/plain'

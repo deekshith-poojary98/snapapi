@@ -3,79 +3,150 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
   <title>Quick start — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="layout">
-    <aside class="sidebar">
-      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
-      <div class="nav-label">Guide</div>
-      <nav>
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
         <a href="../index.html">Home</a>
-        <a href="../index.html#why">Why SnapAPI?</a>
         <a href="install.html">Install</a>
         <a class="active" href="quick-start.html">Quick start</a>
-        <a href="dsl.html">DSL reference</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
         <a href="cli.html">CLI</a>
-        <a href="ci.html">CI / reports</a>
+        <a href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
         <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a class="cta" href="../playground.html">Playground</a>
       </nav>
-      <p class="hint">A first .sapi file and the command that runs it.</p>
+      <p class="hint">A GET, an EXPECT, PASS or FAIL.</p>
     </aside>
-    <main class="content">
-      <button class="menu-btn btn btn-ghost" type="button" data-menu>Menu</button>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
       <p class="kicker">Getting started</p>
-      <h1>Quick start</h1>
-      <p class="lede">Create a <code>.sapi</code> file, point <code>URL:</code> at your API (or a mock), and run <code>snapapi</code> on that file. The older <code>.snaptest</code> extension still works.</p>
+      <h1>Your first PASS</h1>
+      <p class="lede">One GET, one check, PASS. That’s the whole loop. Auth and extra tests can wait.</p>
 
-      <h2>1. Write a suite</h2>
-      <p>Save this as <code>users.sapi</code>. Indentation is optional; keywords are not.</p>
-      <pre><code class="language-snaptest">SUITE: Users
-DESC: Create a user and read it back
-TIMEOUT: 10
-URL: https://api.example.com
-HEADER Content-Type: application/json
+      <h2>Playground</h2>
+      <p>Open the <a href="../playground.html">playground</a>. This sample should already be loaded:</p>
+      <pre><code class="language-snaptest">SUITE: Hello API
+URL: mock://api
 
-TEST: Create User
-TAG: users write
-  POST: /users
-  AUTH: bearer ${TOKEN}
-  BODY: {"name": "Jane", "email": "jane@example.com"}
-  EXPECT: status == 201
-  EXPECT: body contains id
-  SAVE: userId FROM $.id
+TEST: Get Users
+  GET: /users
+  EXPECT: status == 200</code></pre>
+      <p><code>mock://api</code> isn’t the internet — the tab answers <code>GET /users</code> itself. Click <strong>Run</strong>. You want something like:</p>
+      <pre><code>SnapAPI  Hello API
+Using in-memory mock API  (GET /users or /api/users, /health, /jobs/:id)
 
-TEST: Get User
-TAG: users
-SETUP: Create User
-  GET: /users/${userId}
+  Get Users
+    GET /users                        200  1ms
+    PASS  0ms
+
+  1 passed  0 failed  1ms</code></pre>
+      <p>Millisecond numbers bounce around. The <code>1 passed</code> is what matters.</p>
+
+      <h2>Install the CLI</h2>
+      <p>Package on PyPI is <code>pysnapapi</code>. The command is <code>snapapi</code>. Don’t <code>pip install snapapi</code> — that’s someone else’s project (SNAP payments).</p>
+      <pre><code class="language-bash">python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install pysnapapi
+snapapi --version</code></pre>
+      <p>You want <code>snapapi 0.3.0</code> or newer. <code>command not found</code> means the venv isn’t active in this terminal. <code>externally-managed-environment</code> means you skipped the venv. More on <a href="install.html">Install</a>.</p>
+
+      <h2>Same GET on your machine</h2>
+      <p>The playground fakes HTTP in the tab. The CLI sends a real request, so something has to listen. <code>snapapi mock</code> is a tiny server for that.</p>
+      <p>Drop these two files in an empty folder. You don’t need to clone the repo. First, <code>mock.json</code>:</p>
+      <pre><code class="language-json">{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/users",
+      "status": 200,
+      "json": { "data": [{ "id": 1, "name": "Ada" }] }
+    }
+  ]
+}</code></pre>
+      <p>Then <code>hello.sapi</code>. Same GET, but <code>URL:</code> is the mock:</p>
+      <pre><code class="language-snaptest">SUITE: Hello API
+URL: http://127.0.0.1:8765
+
+TEST: Get Users
+  GET: /users
+  EXPECT: status == 200</code></pre>
+      <p>Leave this running in one terminal (it prints the URL):</p>
+      <pre><code class="language-bash">snapapi mock mock.json --port 8765</code></pre>
+      <p>In another terminal, same folder, venv active:</p>
+      <pre><code class="language-bash">snapapi hello.sapi</code></pre>
+      <p>If you cloned the repo, these files are already at <code>examples/hello/mock.json</code> and <code>examples/hello/hello.sapi</code>.</p>
+      <p>A good run looks like:</p>
+      <pre><code>SnapAPI  Hello API
+
+  Get Users
+    GET /users                        200  1ms
+  PASS  1ms
+
+  1 passed  0 failed  1ms</code></pre>
+      <p><code>GET /users</code> hit port 8765, the mock returned 200, that matched the EXPECT, so it PASSed.</p>
+
+      <h2>If it failed</h2>
+      <table>
+        <thead><tr><th>You see</th><th>What it means</th><th>What to do</th></tr></thead>
+        <tbody>
+          <tr><td><code>command not found</code></td><td>The venv is not active in this terminal.</td><td><code>source .venv/bin/activate</code> (Windows: <code>.venv\Scripts\activate</code>).</td></tr>
+          <tr><td><code>Connection refused</code> / <code>ERR</code></td><td>Nothing is listening on that port. The mock is not running.</td><td>Start <code>snapapi mock</code> first. Keep it in the other terminal.</td></tr>
+          <tr><td>HTML 404 from <code>SimpleHTTP</code></td><td>Port 8765 is some other Python server, not the SnapAPI mock.</td><td>Stop it, or use <code>--port 9876</code> and change <code>URL:</code> to <code>http://127.0.0.1:9876</code>.</td></tr>
+          <tr><td><code>Status code expected 200, got 404</code></td><td>HTTP reached a server, but <code>/users</code> is not a route there.</td><td>You are not hitting <code>mock.json</code>. Check the port and that the mock is the SnapAPI one.</td></tr>
+          <tr><td><code>Status code expected 201, got 200</code></td><td>The request worked. Your EXPECT does not match the response.</td><td>That is a failed test, not a broken install. Fix the EXPECT or the mock.</td></tr>
+          <tr><td><code>No such file or directory</code></td><td>Wrong path or wrong folder.</td><td>Run <code>snapapi hello.sapi</code> from the folder that contains the file. Exit code <code>2</code>.</td></tr>
+          <tr><td><code>Unknown keyword</code></td><td>A typo in the <code>.sapi</code> file (keywords are one token, no spaces).</td><td>Fix the line. Exit code <code>2</code>.</td></tr>
+          <tr><td><code>Undefined variable ${…}</code></td><td>This hello file has no <code>${}</code>. You opened a different suite.</td><td>Use the five-line file on this page. More cases: <a href="troubleshooting.html">Troubleshooting</a>.</td></tr>
+        </tbody>
+      </table>
+      <p>New terminal tabs don’t inherit the venv. Activate it in both. Longer list: <a href="troubleshooting.html">Troubleshooting</a>.</p>
+
+      <h2>Check the body too</h2>
+      <p>The mock returns <code>{"data": [{"id": 1, "name": "Ada"}]}</code>. You can assert on that without adding a second request:</p>
+      <pre><code class="language-snaptest">TEST: Get Users
+  GET: /users
   EXPECT: status == 200
-  EXPECT: json $.email == "jane@example.com"
-  EXPECT: header Content-Type contains json</code></pre>
+  EXPECT: body contains data</code></pre>
+      <p>Run it again. Still <code>1 passed</code> — two checks on the same response.</p>
 
-      <h2>2. Provide variables</h2>
-      <p><code>${TOKEN}</code> is interpolated from the process environment, then <code>--env</code> or a file next to the suite (<code>users.env</code>, <code>.env</code>, or the only sibling <code>*.env</code>), then <code>SET</code> / <code>SAVE</code>. A <code>.env</code> file looks like:</p>
-      <pre><code class="language-bash">TOKEN=your-bearer-token</code></pre>
-
-      <h2>3. Run it</h2>
-      <pre><code class="language-bash">snapapi users.sapi
-snapapi users.sapi --env .env
-snapapi tests/ suites/auth.sapi</code></pre>
-      <p>Directories are scanned for <code>*.sapi</code> and <code>*.snaptest</code>. The CLI prints a tree: suite name, each test, request lines with status and duration, then <code>PASS</code> / <code>FAIL</code> and a summary.</p>
-
-      <h2>4. Try the same shape without Python</h2>
-      <p>Open the <a href="../playground.html">playground</a>, pick <strong>Create + SAVE</strong>, and click Run. That sample talks to the in-browser mock at <code>/api/users</code> instead of <code>https://api.example.com</code>.</p>
-
-      <h2>Sample files in this repo</h2>
-      <ul>
-        <li><code>tests/recommended.snaptest</code> — current DSL against the local mock (<code>${BASE_URL}</code>)</li>
-        <li><code>tests/test_suite.snaptest</code> — classic <code>REQUEST:</code> / <code>DATA:</code> / <code>EXPECT: STATUS</code> syntax</li>
-      </ul>
+      <h2>Next</h2>
+      <p>That’s a working test. When you want more:</p>
+      <ol>
+        <li><a href="post.html">POST + BODY</a></li>
+        <li><a href="save.html">SAVE</a> an id and reuse <code>${userId}</code></li>
+        <li><a href="env.html">Tokens from the environment</a></li>
+        <li><a href="helpers.html">HELPER / SETUP</a></li>
+        <li><a href="your-api.html">Hit your own API</a></li>
+      </ol>
+      <p><a href="not-for-you.html">When SnapAPI is not for you</a> · <a href="plugins.html">Plugins</a> · <a href="troubleshooting.html">Troubleshooting</a> if something’s off. Full keyword list: <a href="dsl.html">DSL reference</a>.</p>
       <div class="page-nav">
-        <a href="install.html"><span>Previous</span>Install</a>
-        <a href="dsl.html"><span>Next</span>DSL reference</a>
+        <a href="install.html" rel="prev"><span>Previous</span><strong>Install</strong></a>
+        <a href="post.html" rel="next"><span>Next</span><strong>POST</strong></a>
       </div>
     </main>
   </div>

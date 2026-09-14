@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
+  <title>Helpers — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="layout">
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
+        <a href="../index.html">Home</a>
+        <a href="install.html">Install</a>
+        <a href="quick-start.html">Quick start</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a class="active" href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
+        <a href="cli.html">CLI</a>
+        <a href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
+        <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
+        <a class="cta" href="../playground.html">Playground</a>
+      </nav>
+      <p class="hint">HELPER for setup. TEST for cases you want counted.</p>
+    </aside>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
+      <p class="kicker">Learn</p>
+      <h1>HELPER and SETUP</h1>
+      <p class="lede">If a few tests need the same create step, put it in a <code>HELPER</code> and call it with <code>SETUP:</code>. Helpers don’t show up in the passed/failed count.</p>
+
+      <h2>A helper, then a test</h2>
+      <p>Same mock as <a href="post.html">POST</a>. In the repo: <code>examples/users/helpers.sapi</code>.</p>
+      <pre><code class="language-snaptest">SUITE: Users
+URL: http://127.0.0.1:8765
+
+HELPER: Create User
+  POST: /users
+  BODY: {"name": "Jane", "email": "jane@example.com"}
+  EXPECT: status == 201
+  SAVE: userId FROM $.id
+
+TEST: Get User
+SETUP: Create User
+  GET: /users/${userId}
+  EXPECT: status == 200
+  EXPECT: json $.email == "jane@example.com"</code></pre>
+      <pre><code class="language-bash">snapapi mock mock.json --port 8765
+snapapi helpers.sapi</code></pre>
+      <p>The tree only lists <strong>Get User</strong>. Create ran as setup:</p>
+      <pre><code>SnapAPI  Users
+
+  Get User
+    setup Create User
+      POST /users                       201  4ms
+      saved userId=7
+    GET /users/7                      200  1ms
+  PASS  5ms
+
+  1 passed  0 failed  5ms</code></pre>
+      <p><code>1 passed</code> is right — two HTTP calls, one test.</p>
+
+      <h2>Don’t use TEST for setup</h2>
+      <p>If you write <code>TEST: Create User</code> and then <code>SETUP: Create User</code> on another test, SnapAPI treats Create User as a helper and drops it from the count. Old suites still do that. New ones should use <code>HELPER:</code> for setup and <code>TEST:</code> for cases you want counted.</p>
+      <p><code>HELPER:</code> is a setup procedure. It is not <code>${uuid()}</code> or <a href="plugins.html"><code>CALL</code></a>.</p>
+      <p>The playground understands <code>HELPER</code> / <code>SETUP</code> too. Paste the suite with <code>URL: mock://api</code> if you want to try it there.</p>
+      <div class="page-nav">
+        <a href="env.html" rel="prev"><span>Previous</span><strong>Env / AUTH</strong></a>
+        <a href="your-api.html" rel="next"><span>Next</span><strong>Your API</strong></a>
+      </div>
+    </main>
+  </div>
+  <script src="../assets/highlight.js"></script>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

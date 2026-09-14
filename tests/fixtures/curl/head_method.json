@@ -1,0 +1,7 @@
+{
+  "warnings": [],
+  "semantic": {
+    "method": "HEAD",
+    "endpoint": "/users"
+  }
+}

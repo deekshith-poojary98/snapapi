@@ -3,62 +3,87 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
   <title>Install — SnapAPI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../assets/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="layout">
-    <aside class="sidebar">
-      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
-      <div class="nav-label">Guide</div>
-      <nav>
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
         <a href="../index.html">Home</a>
-        <a href="../index.html#why">Why SnapAPI?</a>
         <a class="active" href="install.html">Install</a>
         <a href="quick-start.html">Quick start</a>
-        <a href="dsl.html">DSL reference</a>
+        <a href="not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
         <a href="cli.html">CLI</a>
-        <a href="ci.html">CI / reports</a>
+        <a href="plugins.html">Plugins</a>
+        <a href="ci.html">CI</a>
         <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a class="cta" href="../playground.html">Playground</a>
       </nav>
-      <p class="hint">Python 3.9 or newer. Editable install is the supported development path.</p>
+      <p class="hint">Package name pysnapapi. Command name snapapi. Python 3.9+.</p>
     </aside>
-    <main class="content">
-      <button class="menu-btn btn btn-ghost" type="button" data-menu>Menu</button>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
       <p class="kicker">Getting started</p>
       <h1>Install SnapAPI</h1>
-      <p class="lede">SnapAPI is a Python package with a <code>snapapi</code> console script. Use a virtualenv so the CLI stays on a known interpreter.</p>
+      <p class="lede">Install <code>pysnapapi</code> from PyPI. That gives you a <code>snapapi</code> command inside the venv. Or skip this and use the <a href="../playground.html">playground</a>.</p>
 
-      <h2>From this repository</h2>
-      <pre><code class="language-bash">git clone https://github.com/Deekshith-07/snapapi.git
+      <div class="callout"><strong>Wrong package:</strong> <code>pip install snapapi</code> is a different project (Indonesian SNAP payments). This one is <code>pysnapapi</code>.</div>
+
+      <h2>From PyPI</h2>
+      <h3>macOS / Linux</h3>
+      <pre><code class="language-bash">python3 -m venv .venv
+source .venv/bin/activate
+pip install pysnapapi
+snapapi --version</code></pre>
+      <h3>Windows</h3>
+      <pre><code class="language-bash">py -3 -m venv .venv
+.venv\Scripts\activate
+pip install pysnapapi
+snapapi --version</code></pre>
+      <p>You’re looking for a line like <code>snapapi 0.3.0</code>. Then go to <a href="quick-start.html">Quick start</a> — you can paste the files, no clone required.</p>
+
+      <h2>If it fails</h2>
+      <ul>
+        <li><code>command not found</code> / <code>not recognized</code> — venv isn’t active. Activate it, or run <code>.venv/bin/snapapi</code> (Windows: <code>.venv\Scripts\snapapi</code>).</li>
+        <li><code>externally-managed-environment</code> — system Python blocked a global pip. Use the venv above.</li>
+        <li>You installed <code>snapapi</code> and got a FastAPI/SNAP payments library — uninstall it, then <code>pip install pysnapapi</code>.</li>
+      </ul>
+
+      <h2>From this repository (contributors)</h2>
+      <pre><code class="language-bash">git clone https://github.com/deekshith-poojary98/snapapi.git
 cd snapapi
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"</code></pre>
-      <p><code>.[dev]</code> adds this repository’s test extras. The <code>watch</code> extra is optional and pulls in <code>watchdog</code> for <code>snapapi watch</code>.</p>
-      <pre><code class="language-bash">pip install -e ".[watch]"</code></pre>
-
-      <h2>Pinned runtime dependencies</h2>
-      <p>If you want the lock-style requirements file instead of the extra:</p>
+pip install -e ".[dev]"
+snapapi --version</code></pre>
+      <p><code>.[dev]</code> adds pytest. <code>pip install -e ".[watch]"</code> adds <code>watchdog</code> for <code>snapapi watch</code>.</p>
       <pre><code class="language-bash">pip install -r requirements.txt
 pip install -e .</code></pre>
-
-      <h2>Confirm the CLI</h2>
-      <pre><code class="language-bash">snapapi --help
-python -m snapapi --help</code></pre>
-      <p>The process is the same either way. Exit codes: <code>0</code> all tests passed, <code>1</code> a test failed, <code>2</code> parse or usage error.</p>
-
-      <h2>Requirements</h2>
-      <ul>
-        <li>Python 3.9 or newer</li>
-        <li>Runtime: <code>requests</code>, <code>colorama</code>, <code>jsonschema</code>, <code>PyYAML</code></li>
-      </ul>
-      <div class="callout">You can skip install entirely and <a href="../playground.html">run suites in the playground</a>. The playground is a JavaScript interpreter plus an in-memory mock; it is not a substitute for CI.</div>
-
+      <p>Exit codes when you run suites: <code>0</code> everything passed, <code>1</code> a test failed, <code>2</code> parse or usage error (missing file included).</p>
       <div class="page-nav">
-        <a href="../index.html"><span>Previous</span>Home</a>
-        <a href="quick-start.html"><span>Next</span>Quick start</a>
+        <a href="../index.html" rel="prev"><span>Previous</span><strong>Home</strong></a>
+        <a href="quick-start.html" rel="next"><span>Next</span><strong>Quick start</strong></a>
       </div>
     </main>
   </div>

@@ -1,0 +1,17 @@
+{
+  "warnings": [],
+  "must_contain": [
+    "AUTH: bearer ${TOKEN}"
+  ],
+  "must_not_contain": [
+    "HEADER Authorization:",
+    "Bearer $TOKEN"
+  ],
+  "semantic": {
+    "method": "GET",
+    "endpoint": "/x",
+    "auth": "bearer ${TOKEN}",
+    "prefer_auth": true,
+    "headers_absent": ["Authorization"]
+  }
+}

@@ -3,108 +3,122 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#11141a">
   <title>SnapAPI — HTTP API testing DSL</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/style.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="layout">
-    <aside class="sidebar">
-      <a class="brand" href="index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span>SnapAPI</a>
-      <div class="nav-label">Guide</div>
-      <nav>
+    <aside class="sidebar" id="site-sidebar">
+      <a class="brand" href="index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
         <a class="active" href="index.html">Home</a>
-        <a href="index.html#why">Why SnapAPI?</a>
         <a href="guide/install.html">Install</a>
         <a href="guide/quick-start.html">Quick start</a>
-        <a href="guide/dsl.html">DSL reference</a>
+        <a href="guide/not-for-you.html">When not</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="guide/post.html">POST</a>
+        <a href="guide/save.html">SAVE</a>
+        <a href="guide/env.html">Env / AUTH</a>
+        <a href="guide/helpers.html">Helpers</a>
+        <a href="guide/your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="guide/dsl.html">DSL</a>
         <a href="guide/cli.html">CLI</a>
-        <a href="guide/ci.html">CI / reports</a>
+        <a href="guide/plugins.html">Plugins</a>
+        <a href="guide/ci.html">CI</a>
         <a href="guide/vscode.html">VS Code</a>
+        <a href="guide/troubleshooting.html">Troubleshooting</a>
         <a class="cta" href="playground.html">Playground</a>
       </nav>
-      <p class="hint">Python 3.9+ CLI. The playground runs a subset of the DSL in your browser against a mock API.</p>
+      <p class="hint">Python CLI. Playground runs in the browser against a mock.</p>
     </aside>
-    <main class="content">
-      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false">Menu</button>
+    <main class="content" id="main">
+      <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
       <p class="kicker">User guide</p>
-      <h1>Write HTTP API tests as plain text, then run them.</h1>
-      <p class="lede">SnapAPI is a Python HTTP testing DSL. You author <code>.sapi</code> files with <code>GET</code>, <code>POST</code>, <code>EXPECT</code>, and <code>SAVE</code>, then run <code>snapapi file.sapi</code>. No YAML maze, no generated client. The older <code>.snaptest</code> extension still works.</p>
+      <h1>HTTP tests as a text file.</h1>
+      <p class="lede">SnapAPI is a small language for hitting APIs. You write a <code>.sapi</code> file, run <code>snapapi</code>, and get PASS or FAIL. A GET is enough to start. Tokens and setup can wait.</p>
       <div class="hero-actions">
         <a class="btn btn-primary" href="playground.html">Try it in the browser</a>
-        <a class="btn btn-ghost" href="guide/quick-start.html">Write your first suite</a>
+        <a class="btn btn-ghost" href="guide/quick-start.html">Run it on your machine</a>
       </div>
       <div class="cards">
         <article class="card">
-          <h3>Readable DSL</h3>
-          <p>Suite, test, request, body, expects. Indentation is cosmetic. Comments are <code>//</code> lines. Modern <code>GET:</code> aliases and legacy <code>REQUEST:</code> both parse.</p>
+          <h3>No install needed</h3>
+          <p>The <a href="playground.html">playground</a> runs in this tab against a fake API. Hello sample, click Run, you get PASS.</p>
         </article>
         <article class="card">
-          <h3>Checks that match real APIs</h3>
-          <p>Status, body contains, JSONPath, headers, schema, XPath, duration, and OpenAPI contract checks — plus <code>SAVE</code> into <code>${var}</code>.</p>
+          <h3>Same thing on the CLI</h3>
+          <p><a href="guide/quick-start.html">Quick start</a> is that GET on your laptop, with a tiny mock server so you don’t need a public API.</p>
         </article>
         <article class="card">
-          <h3>Built for CI</h3>
-          <p>JUnit, HTML, and JSON reports, VCR cassettes, <code>--safe-url</code>, tag filters, retries, and a Python helper to run suites from your own code.</p>
+          <h3>The usual HTTP stuff</h3>
+          <p><a href="guide/post.html">POST</a>, <a href="guide/save.html">SAVE</a> an id, <a href="guide/env.html">tokens</a>, <a href="guide/helpers.html">helpers</a> — then point <code>URL:</code> at <a href="guide/your-api.html">your own origin</a>.</p>
         </article>
         <article class="card">
-          <h3>In-browser playground</h3>
-          <p>Type a <code>.sapi</code> suite and click Run. A client-side interpreter hits an in-memory mock so you do not need Python or a network.</p>
+          <h3>CI is the same command</h3>
+          <p>Once a suite is green locally, drop <code>snapapi</code> in the pipeline. Reports and cassettes live under <a href="guide/ci.html">CI</a>.</p>
         </article>
       </div>
 
-      <h2 id="why">Why SnapAPI?</h2>
-      <p class="pitch">SnapAPI is for HTTP tests that should read like the API. The file <em>is</em> the request.</p>
-      <p>You write a suite of named tests. Each test has one or more HTTP steps, then <code>EXPECT</code> and <code>SAVE</code>. A reviewer sees the path, the body, and the checks in the same file you run.</p>
+      <h2 id="why">Why this exists</h2>
+      <p class="pitch">Most HTTP tests hide the request in helpers and fixtures. Here the file <em>is</em> the request.</p>
+      <p>Someone reviewing your PR should see the path, the body, and the checks without opening another file.</p>
       <div class="why-grid">
         <article class="why">
-          <h3>The test looks like the API</h3>
-          <p>A reviewer sees <code>POST: /users</code>, <code>EXPECT: json $.email</code>, <code>SAVE: id FROM $.id</code>. The contract and the test are the same text.</p>
+          <h3>It reads like the API</h3>
+          <p><code>GET: /users</code> and <code>EXPECT: status == 200</code> are the whole test. POST and SAVE are the same kind of line.</p>
         </article>
         <article class="why">
-          <h3>HTTP primitives as keywords</h3>
-          <p>Chaining, <code>WAIT</code>, <code>EXAMPLES</code>, VCR, redacted fail dumps, curl/HAR on fail, profiles, and OpenAPI checks are keywords in the suite.</p>
+          <h3>Five lines to a green run</h3>
+          <p>You don’t need OpenAPI, a cassette, or a token to see PASS. Hello world is a GET against a local mock.</p>
         </article>
         <article class="why">
-          <h3>Plain text in git</h3>
-          <p><code>.sapi</code> files are text. They diff, review, and branch with the rest of the repo.</p>
+          <h3>Just files</h3>
+          <p><code>.sapi</code> is plain text. It diffs and reviews like anything else in the repo.</p>
         </article>
         <article class="why">
-          <h3>Shared by the people who own the API</h3>
-          <p>SDETs and backend reviewers can write and review the same files. The suite is the contract.</p>
+          <h3>One file for QA and backend</h3>
+          <p>If both sides can read HTTP, both sides can read the suite. That’s the point.</p>
         </article>
       </div>
       <h3>When it fits</h3>
       <ul>
-        <li>The test <em>is</em> the HTTP call</li>
-        <li>You want smoke and regression that reviews as the contract</li>
-        <li>QA and backend share the same files</li>
-        <li>You want to run those files from the CLI, or from Python with <code>run_suites</code></li>
+        <li>Smoke and regression that should look like the real calls</li>
+        <li>QA and backend sharing the same files</li>
+        <li>You already curl the API and want that in git</li>
+        <li>Running from the CLI, or from Python with <code>run_suites</code></li>
       </ul>
 
-      <h2>Thirty-second example</h2>
-      <pre><code class="language-snaptest">SUITE: Book Store
-DESC: Validates the user API
-URL: https://api.example.com
-HEADER Content-Type: application/json
+      <h2 id="when-not">When SnapAPI is not for you</h2>
+      <p>SnapAPI isn’t designed to replace every API testing framework.</p>
+      <p>If your tests need complex programming logic, custom cryptography inside the suite, extensive Python fixtures, WebSockets, gRPC, or highly customized execution flows, keep your existing framework.</p>
+      <p>SnapAPI is for teams whose API tests mostly look like:</p>
+      <p class="pitch"><strong>request → assert → extract → request → assert</strong></p>
+      <p>If that’s 80% of your suite, SnapAPI makes that 80% easier to read, review, and maintain. The other 20% stays in Python — <a href="guide/plugins.html"><code>CALL</code></a> from <code>extensions/</code> for one ugly value, or pytest around the runner. The <code>.sapi</code> file still describes HTTP; Python does not leak into the test language. Not <code>IF</code> / <code>FOR</code> / <code>WHILE</code> in the file.</p>
+      <p>The longer version: <a href="guide/not-for-you.html">When SnapAPI is not for you</a>.</p>
 
-TEST: Create User
-  POST: /users
-  AUTH: bearer ${TOKEN}
-  BODY: {"name": "Jane", "email": "jane@example.com"}
-  EXPECT: status == 201
-  SAVE: userId FROM $.id
+      <h2>What it looks like</h2>
+      <pre><code class="language-snaptest">SUITE: Hello API
+URL: mock://api
 
-TEST: Get User
-SETUP: Create User
-  GET: /users/${userId}
-  EXPECT: status == 200
-  EXPECT: json $.email == "jane@example.com"</code></pre>
-      <p>On your machine that file is executed by the <code>snapapi</code> CLI. In this guide, the <a href="playground.html">playground</a> runs the same shape of suite against a built-in mock at <code>/api/users</code>.</p>
-      <h2>What SnapAPI is not</h2>
-      <p>There is no language server, gRPC, or WebSocket support. OpenAPI smoke generation and contract checks exist; they do not replace a full spec toolchain. The playground implements a <strong>useful subset</strong> of the DSL — FILE, GRAPHQL, IMPORT, oauth2, schema, and XPath still need the Python CLI.</p>
+TEST: Get Users
+  GET: /users
+  EXPECT: status == 200</code></pre>
+      <p><code>mock://api</code> is the playground’s fake server. On your laptop, <a href="guide/quick-start.html">quick start</a> uses <code>snapapi mock</code> instead. Don’t try <code>api.example.com</code> — that host isn’t ours.</p>
+      <h2>Playground vs CLI</h2>
+      <p>No language server, no gRPC, no WebSockets. OpenAPI checks exist if you want them; they’re not a spec toolchain. The playground covers a useful chunk of the language. FILE, GRAPHQL, IMPORT, oauth2, schema, XPath, and <a href="guide/plugins.html"><code>CALL</code></a> still need the CLI.</p>
       <div class="page-nav">
-        <span></span>
-        <a href="guide/install.html"><span>Next</span>Install</a>
+        <a href="guide/install.html" rel="next"><span>Next</span><strong>Install</strong></a>
       </div>
     </main>
   </div>

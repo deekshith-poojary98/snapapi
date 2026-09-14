@@ -1,0 +1,10 @@
+SUITE: Signed ping
+URL: http://127.0.0.1:8765
+
+SET: PAYLOAD snapapi
+
+TEST: Signed request
+  CALL: signature = crypto.generate_signature(${PAYLOAD}, ${HMAC_SECRET})
+  GET: /users
+  HEADER: X-Signature: ${signature}
+  EXPECT: status == 200

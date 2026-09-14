@@ -1,0 +1,8 @@
+SUITE: Users
+URL: https://api.example.com
+
+TEST: Create User
+  POST: /users
+  AUTH: bearer ${TOKEN}
+  HEADER Content-Type: application/json
+  BODY: {"name": "Jane", "email": "jane@example.com"}

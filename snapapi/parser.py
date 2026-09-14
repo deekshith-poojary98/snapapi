@@ -49,9 +49,14 @@ KNOWN_KEYWORDS = {
     "QUARANTINE",
     "WAIT",
     "SET",
+    "CALL",
 } | set(HTTP_METHODS)
 EXPECT_RETRY_RE = re.compile(
     r"\sRETRY\s+(\d+)(?:\s+ON\s+(\S+))?(?:\s+BACKOFF\s+(\S+))?\s*$",
+    re.IGNORECASE,
+)
+EXPECT_BECAUSE_RE = re.compile(
+    r"""\sBECAUSE\s+("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+)\s*$""",
     re.IGNORECASE,
 )
 WAIT_TAIL_RE = re.compile(
@@ -70,27 +75,71 @@ JSON_EACH_RE = re.compile(
     r"^(.+?)\s+each\s+(\S+)\s+(==|!=|CONTAINS|MATCHES|>=|<=|>|<)\s+(.+)$",
     re.DOTALL | re.IGNORECASE,
 )
-JSON_CONTAINS_ALL_RE = re.compile(
-    r"^(.+?)\s+contains(?:-|\s+)all\s+(.+)$",
+JSON_CONTAINS_SET_RE = re.compile(
+    r"^(.+?)\s+contains(?:-|\s+)(all|only|any)\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_NOT_MATCHES_RE = re.compile(
+    r"^(.+?)\s+not\s+matches\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_AFFIX_RE = re.compile(
+    r"^(.+?)\s+(starts-with|ends-with)\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_CLOSE_TO_RE = re.compile(
+    r"^(.+?)\s+close-to\s+(\S+)\s+(?:delta|±|\+/-)\s+(\S+)\s*$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_BETWEEN_RE = re.compile(
+    r"^(.+?)\s+between\s+(\S+)\s+(\S+)\s*$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_TYPE_RE = re.compile(
+    r"^(.+?)\s+type\s+(\S+)\s*$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_UNARY_RE = re.compile(
+    r"^(.+?)\s+(not\s+empty|empty|unique)\s*$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_IN_RE = re.compile(
+    r"^(.+?)\s+in\s+(.+)$",
     re.DOTALL | re.IGNORECASE,
 )
 JSON_EXPECT_RE = re.compile(
     r"^(\S+)\s+(==|!=|CONTAINS|MATCHES|>=|<=|>|<)\s+(.+)$",
     re.DOTALL | re.IGNORECASE,
 )
+JSON_TYPES = {"string", "number", "array", "object", "boolean", "null"}
 XPATH_EXPECT_RE = re.compile(
     r"^(\S+)\s+(==|!=|CONTAINS)\s+(.+)$",
     re.DOTALL | re.IGNORECASE,
 )
-HEADER_EXPECT_RE = re.compile(r"^(\S+)\s+(==|!=|CONTAINS)\s+(.+)$", re.DOTALL | re.IGNORECASE)
+HEADER_UNARY_RE = re.compile(
+    r"^(\S+)\s+(not\s+empty|empty)\s*$",
+    re.IGNORECASE,
+)
+HEADER_EXPECT_RE = re.compile(
+    r"^(\S+)\s+(==|!=|CONTAINS|NOT\s+MATCHES|MATCHES|STARTS-WITH|ENDS-WITH|IN)\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
 STATUS_VALUE_RE = re.compile(r"^(==|!=)?\s*(.+)$", re.DOTALL)
-BODY_CONTAINS_RE = re.compile(r"^(not\s+)?contains\s+(.+)$", re.IGNORECASE | re.DOTALL)
+BODY_UNARY_RE = re.compile(r"^(not\s+)?empty\s*$", re.IGNORECASE)
+BODY_OP_RE = re.compile(
+    r"^(not\s+)?(contains|matches|starts-with|ends-with)\s+(.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
 DURATION_RE = re.compile(r"^(<=|>=|<|>|==)\s*(\d+(?:\.\d+)?)(ms|s)?$", re.IGNORECASE)
 SAVE_RE = re.compile(
     r"^([A-Za-z_][A-Za-z0-9_]*)\s+FROM\s+(header|cookie|json)?\s*(.+)$",
     re.IGNORECASE,
 )
 FILE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s+FROM\s+(.+)$", re.IGNORECASE)
+CALL_RE = re.compile(
+    r"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*\((.*)\)\s*$"
+)
+BODY_VAR_RE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
 TAG_SPLIT_RE = re.compile(r"[,\s]+")
 AUTH_SCHEMES = {
     "bearer": "Bearer",
@@ -129,6 +178,71 @@ def unknown_keyword_message(raw):
 
 
 BOOL_OP_RE = re.compile(r"\s*(AND|OR)\b", re.IGNORECASE)
+
+
+def _is_unquoted_index(text, index):
+    quote = None
+    escape = False
+    for i, ch in enumerate(text):
+        if i >= index:
+            return quote is None
+        if quote:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote:
+                quote = None
+            continue
+        if ch in "\"'":
+            quote = ch
+    return quote is None
+
+
+def _last_unquoted_match(pattern, text):
+    last = None
+    for match in pattern.finditer(text):
+        start = match.start()
+        keyword_at = start + (len(match.group(0)) - len(match.group(0).lstrip()))
+        if _is_unquoted_index(text, keyword_at):
+            last = match
+    return last
+
+
+def _take_because(rest):
+    match = _last_unquoted_match(EXPECT_BECAUSE_RE, rest)
+    if not match or match.end() != len(rest.rstrip()):
+        return rest, None
+    reason = _strip_quotes(match.group(1).strip())
+    return rest[: match.start()].strip(), reason
+
+
+def _take_retry(rest):
+    match = EXPECT_RETRY_RE.search(rest)
+    if not match:
+        return rest, None
+    keyword_at = match.start() + (len(match.group(0)) - len(match.group(0).lstrip()))
+    if not _is_unquoted_index(rest, keyword_at):
+        return rest, None
+    return rest[: match.start()].strip(), match
+
+
+def _strip_expect_suffixes(rest):
+    retry_match = None
+    because = None
+    while rest:
+        nxt_rest, nxt_retry = _take_retry(rest)
+        if nxt_retry is not None:
+            rest = nxt_rest
+            retry_match = nxt_retry
+            continue
+        nxt_rest, nxt_because = _take_because(rest)
+        if nxt_because is not None:
+            rest = nxt_rest
+            because = nxt_because
+            continue
+        break
+    return rest, retry_match, because
 
 
 def walk_expect_checks(check):
@@ -295,6 +409,7 @@ class TestParser:
             "oauth2": None,
             "digest": None,
             "sets": [],
+            "preps": [],
             "tests": [],
             "test_map": {},
             "source": filename,
@@ -389,6 +504,7 @@ class TestParser:
                     "only": False,
                     "quarantine": None,
                     "sets": [],
+                    "preps": [],
                     "digest": None,
                     "source": filename,
                     "lineno": lineno,
@@ -489,12 +605,10 @@ class TestParser:
                 current_step["wait"] = self._parse_wait(rest, filename, lineno)
             elif keyword == "SET":
                 item = self._parse_set(rest, filename, lineno)
-                if current_step is not None:
-                    current_step.setdefault("sets", []).append(item)
-                elif current_test is not None:
-                    current_test.setdefault("sets", []).append(item)
-                else:
-                    suite.setdefault("sets", []).append(item)
+                self._append_prep(suite, current_test, current_step, item)
+            elif keyword == "CALL":
+                item = self._parse_call(rest, filename, lineno)
+                self._append_prep(suite, current_test, current_step, item)
             i += 1
 
         if current_test is not None:
@@ -577,6 +691,7 @@ class TestParser:
             "follow_redirects": None,
             "wait": None,
             "sets": [],
+            "preps": [],
             "digest": None,
             "lineno": lineno,
         }
@@ -740,7 +855,7 @@ class TestParser:
         retry = None
         retry_on = None
         retry_backoff = None
-        retry_match = EXPECT_RETRY_RE.search(rest)
+        rest, retry_match, because = _strip_expect_suffixes(rest)
         if retry_match:
             retry = int(retry_match.group(1))
             if retry < 1:
@@ -748,15 +863,17 @@ class TestParser:
             retry_on = (retry_match.group(2) or "").lower() or None
             if retry_match.group(3):
                 retry_backoff = _parse_duration_seconds(retry_match.group(3), filename, lineno)
-            rest = rest[: retry_match.start()].strip()
 
         node = _ExpectExprParser(rest, filename, lineno, lambda slice_: self._parse_expect_atomic(slice_, filename, lineno)).parse()
         node["retry"] = retry
         node["retry_on"] = retry_on
         node["retry_backoff"] = retry_backoff
+        if because:
+            node["because"] = because
         return node
 
     def _parse_expect_atomic(self, rest, filename, lineno):
+        rest, because = _take_because(rest)
         kind_match = EXPECT_KIND_RE.match(rest)
         if not kind_match:
             kind, _, _remainder = rest.partition(" ")
@@ -780,26 +897,55 @@ class TestParser:
         elif kind in ("CONTAINS", "BODY"):
             negated = False
             value = remainder
+            operator = "CONTAINS"
             if kind == "BODY":
-                body_match = BODY_CONTAINS_RE.match(remainder)
-                if not body_match:
+                unary = BODY_UNARY_RE.match(remainder)
+                body_match = BODY_OP_RE.match(remainder)
+                if unary:
+                    negated = bool(unary.group(1))
+                    operator = "NOT EMPTY" if negated else "EMPTY"
+                    value = ""
+                elif body_match:
+                    negated = bool(body_match.group(1))
+                    operator = body_match.group(2).upper()
+                    if operator in ("CONTAINS", "MATCHES") and negated:
+                        operator = "NOT " + operator
+                    elif operator not in ("CONTAINS", "MATCHES") and negated:
+                        raise ParseError(
+                            "EXPECT body must look like: body contains <text>",
+                            filename=filename,
+                            lineno=lineno,
+                        )
+                    value = body_match.group(3).strip()
+                else:
                     raise ParseError(
                         "EXPECT body must look like: body contains <text>",
                         filename=filename,
                         lineno=lineno,
                     )
-                negated = bool(body_match.group(1))
-                value = body_match.group(2).strip()
             elif remainder.lower().startswith("not contains"):
                 negated = True
+                operator = "CONTAINS"
                 value = remainder[12:].strip()
-            if not value:
+            if operator in ("CONTAINS", "MATCHES", "NOT CONTAINS", "NOT MATCHES", "STARTS-WITH", "ENDS-WITH") and not value:
                 raise ParseError("EXPECT CONTAINS requires a value", filename=filename, lineno=lineno)
-            check.update({"type": "CONTAINS", "value": _strip_quotes(value), "negated": negated})
+            check.update({
+                "type": "CONTAINS",
+                "operator": operator,
+                "value": _strip_quotes(value) if value else "",
+                "negated": negated,
+            })
         elif kind == "JSON":
             length_match = JSON_LENGTH_RE.match(remainder)
             each_match = JSON_EACH_RE.match(remainder)
-            contains_all_match = JSON_CONTAINS_ALL_RE.match(remainder)
+            contains_set_match = JSON_CONTAINS_SET_RE.match(remainder)
+            not_matches_match = JSON_NOT_MATCHES_RE.match(remainder)
+            affix_match = JSON_AFFIX_RE.match(remainder)
+            close_to_match = JSON_CLOSE_TO_RE.match(remainder)
+            between_match = JSON_BETWEEN_RE.match(remainder)
+            type_match = JSON_TYPE_RE.match(remainder)
+            unary_match = JSON_UNARY_RE.match(remainder)
+            in_match = JSON_IN_RE.match(remainder)
             if length_match:
                 check.update({
                     "type": "JSON",
@@ -817,12 +963,73 @@ class TestParser:
                     "each_operator": operator.upper() if operator.upper() in ("CONTAINS", "MATCHES") else operator,
                     "value": _parse_expect_value(each_match.group(4).strip()),
                 })
-            elif contains_all_match:
+            elif contains_set_match:
                 check.update({
                     "type": "JSON",
-                    "path": contains_all_match.group(1).strip(),
-                    "operator": "CONTAINS-ALL",
-                    "value": _parse_expect_value(contains_all_match.group(2).strip()),
+                    "path": contains_set_match.group(1).strip(),
+                    "operator": "CONTAINS-" + contains_set_match.group(2).upper(),
+                    "value": _parse_expect_value(contains_set_match.group(3).strip()),
+                })
+            elif not_matches_match:
+                check.update({
+                    "type": "JSON",
+                    "path": not_matches_match.group(1).strip(),
+                    "operator": "NOT MATCHES",
+                    "value": _parse_expect_value(not_matches_match.group(2).strip()),
+                })
+            elif affix_match:
+                check.update({
+                    "type": "JSON",
+                    "path": affix_match.group(1).strip(),
+                    "operator": affix_match.group(2).upper(),
+                    "value": _parse_expect_value(affix_match.group(3).strip()),
+                })
+            elif close_to_match:
+                check.update({
+                    "type": "JSON",
+                    "path": close_to_match.group(1).strip(),
+                    "operator": "CLOSE-TO",
+                    "value": _parse_expect_value(close_to_match.group(2).strip()),
+                    "delta": _parse_expect_value(close_to_match.group(3).strip()),
+                })
+            elif between_match:
+                check.update({
+                    "type": "JSON",
+                    "path": between_match.group(1).strip(),
+                    "operator": "BETWEEN",
+                    "value": [
+                        _parse_expect_value(between_match.group(2).strip()),
+                        _parse_expect_value(between_match.group(3).strip()),
+                    ],
+                })
+            elif type_match:
+                type_name = type_match.group(2).strip().lower()
+                if type_name not in JSON_TYPES:
+                    raise ParseError(
+                        "EXPECT JSON type must be string, number, array, object, boolean, or null",
+                        filename=filename,
+                        lineno=lineno,
+                    )
+                check.update({
+                    "type": "JSON",
+                    "path": type_match.group(1).strip(),
+                    "operator": "TYPE",
+                    "value": type_name,
+                })
+            elif unary_match:
+                operator = re.sub(r"\s+", " ", unary_match.group(2).strip().upper())
+                check.update({
+                    "type": "JSON",
+                    "path": unary_match.group(1).strip(),
+                    "operator": operator,
+                    "value": None,
+                })
+            elif in_match:
+                check.update({
+                    "type": "JSON",
+                    "path": in_match.group(1).strip(),
+                    "operator": "IN",
+                    "value": _parse_expect_value(in_match.group(2).strip()),
                 })
             else:
                 match = JSON_EXPECT_RE.match(remainder)
@@ -840,20 +1047,37 @@ class TestParser:
                     "value": _parse_expect_value(match.group(3).strip()),
                 })
         elif kind == "HEADER":
+            unary = HEADER_UNARY_RE.match(remainder)
             match = HEADER_EXPECT_RE.match(remainder)
-            if not match:
+            if unary:
+                operator = re.sub(r"\s+", " ", unary.group(2).strip().upper())
+                check.update({
+                    "type": "HEADER",
+                    "name": unary.group(1),
+                    "operator": operator,
+                    "value": "",
+                })
+            elif match:
+                operator = match.group(2)
+                op_upper = re.sub(r"\s+", " ", operator.strip().upper())
+                if op_upper in ("CONTAINS", "MATCHES", "NOT MATCHES", "STARTS-WITH", "ENDS-WITH", "IN"):
+                    stored_op = op_upper
+                else:
+                    stored_op = operator
+                value_raw = match.group(3).strip()
+                value = _parse_expect_value(value_raw) if stored_op == "IN" else _strip_quotes(value_raw)
+                check.update({
+                    "type": "HEADER",
+                    "name": match.group(1),
+                    "operator": stored_op,
+                    "value": value,
+                })
+            else:
                 raise ParseError(
                     "EXPECT HEADER must look like: HEADER Content-Type CONTAINS json",
                     filename=filename,
                     lineno=lineno,
                 )
-            operator = match.group(2)
-            check.update({
-                "type": "HEADER",
-                "name": match.group(1),
-                "operator": operator.upper() if operator.upper() == "CONTAINS" else operator,
-                "value": _strip_quotes(match.group(3).strip()),
-            })
         elif kind == "SCHEMA":
             if remainder.lower().startswith("inline"):
                 payload, _ = self._read_json(remainder[6:].strip(), [remainder[6:].strip()], 0, filename, lineno)
@@ -898,6 +1122,8 @@ class TestParser:
             })
         else:
             raise ParseError(f"Unknown EXPECT check '{kind}'", filename=filename, lineno=lineno)
+        if because:
+            check["because"] = because
         return check
 
     def _parse_save(self, rest, filename, lineno):
@@ -947,7 +1173,45 @@ class TestParser:
         name, value = parts
         if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", name):
             raise ParseError("SET name must be an identifier", filename=filename, lineno=lineno)
-        return {"name": name, "value": value}
+        return {"kind": "set", "name": name, "value": value}
+
+    def _parse_call(self, rest, filename, lineno):
+        if not rest:
+            raise ParseError(
+                "CALL must look like: CALL: name = function(${ARG})",
+                filename=filename,
+                lineno=lineno,
+            )
+        match = CALL_RE.match(rest)
+        if not match:
+            raise ParseError(
+                "CALL must look like: CALL: name = function(${ARG}) or ns.function()",
+                filename=filename,
+                lineno=lineno,
+            )
+        name, func, raw_args = match.group(1), match.group(2), match.group(3)
+        from snapapi.plugins import split_call_args
+
+        return {
+            "kind": "call",
+            "name": name,
+            "func": func,
+            "args": split_call_args(raw_args),
+        }
+
+    def _append_prep(self, suite, current_test, current_step, item):
+        if current_step is not None:
+            current_step.setdefault("preps", []).append(item)
+            if item.get("kind") == "set":
+                current_step.setdefault("sets", []).append(item)
+        elif current_test is not None:
+            current_test.setdefault("preps", []).append(item)
+            if item.get("kind") == "set":
+                current_test.setdefault("sets", []).append(item)
+        else:
+            suite.setdefault("preps", []).append(item)
+            if item.get("kind") == "set":
+                suite.setdefault("sets", []).append(item)
 
     def _parse_file(self, rest, filename, lineno):
         match = FILE_RE.match(rest)
@@ -976,6 +1240,10 @@ class TestParser:
             step["body_type"] = "raw"
             step["content_type"] = parts[0]
             step["raw_body"] = parts[1] if len(parts) == 2 else ""
+            return index
+        if BODY_VAR_RE.match(rest.strip()):
+            step["body_type"] = "json"
+            step["data"] = rest.strip()
             return index
         payload, last = self._read_json(rest, lines, index, filename, lineno)
         step["body_type"] = "json"
