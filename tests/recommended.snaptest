@@ -1,4 +1,5 @@
-// Recommended DSL. Pytest runs this against a local mock server with BASE_URL and TOKEN.
+// Recommended DSL. Pytest injects BASE_URL and TOKEN against a local mock.
+// tests/recommended.env supplies dummy values for `snapapi lint`.
 
 SUITE: Recommended syntax
 DESC: End-to-end suite using the current SnapAPI DSL

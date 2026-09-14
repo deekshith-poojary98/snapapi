@@ -122,6 +122,11 @@ TEST: A
     assert main(["lint", str(bad)]) == 2
 
 
+def test_lint_recommended_suite_uses_sibling_env():
+    suite = Path(__file__).parent / "recommended.snaptest"
+    assert main(["lint", str(suite)]) == 0
+
+
 def test_profile_and_workers_isolate_save(http_server, tmp_path):
     http_server.on("GET", "/a", json={"id": "a"})
     http_server.on("GET", "/b", json={"id": "b"})
