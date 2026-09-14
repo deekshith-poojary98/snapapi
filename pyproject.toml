@@ -38,7 +38,7 @@ snapapi = "snapapi.cli:entry"
 snapapi = "snapapi.pytest_plugin"
 
 [project.urls]
-Homepage = "https://github.com/deekshith-poojary98/snapapi"
+Homepage = "https://deekshith-poojary98.github.io/snapapi/"
 Documentation = "https://github.com/deekshith-poojary98/snapapi#readme"
 Repository = "https://github.com/deekshith-poojary98/snapapi"
 Issues = "https://github.com/deekshith-poojary98/snapapi/issues"
