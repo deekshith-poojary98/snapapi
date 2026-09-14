@@ -15,16 +15,27 @@
   <div class="layout">
     <aside class="sidebar" id="site-sidebar">
       <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
-      <div class="nav-label">Guide</div>
-      <nav aria-label="Docs">
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
         <a href="../index.html">Home</a>
-        <a href="../index.html#why">Why SnapAPI?</a>
         <a href="install.html">Install</a>
         <a href="quick-start.html">Quick start</a>
-        <a class="active" href="dsl.html">DSL reference</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a class="active" href="dsl.html">DSL</a>
         <a href="cli.html">CLI</a>
-        <a href="ci.html">CI / reports</a>
+        <a href="ci.html">CI</a>
         <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a class="cta" href="../playground.html">Playground</a>
       </nav>
       <p class="hint">Keywords match the Python parser. They are single tokens (hyphens allowed, spaces are not). Unknown keywords are parse errors.</p>
@@ -33,17 +44,17 @@
       <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
       <p class="kicker">Language</p>
       <h1>DSL reference</h1>
-      <p class="lede">A <code>.sapi</code> file is a suite of named tests. Each test has one or more HTTP steps. Comments are <code>//</code> lines. Blank lines are ignored. Indentation is cosmetic. The older <code>.snaptest</code> extension still works.</p>
-      <ol class="toc">
-        <li><a href="#suite">Suite</a></li>
-        <li><a href="#test">Test</a></li>
-        <li><a href="#request">Request</a></li>
-        <li><a href="#body">Bodies</a></li>
-        <li><a href="#expect">Expect</a></li>
-        <li><a href="#save">SAVE, SET, variables</a></li>
-        <li><a href="#wait">WAIT and retries</a></li>
-        <li><a href="#legacy">Modern vs legacy</a></li>
-      </ol>
+      <p class="lede">What the parser accepts. Indentation doesn’t matter. New files should be <code>.sapi</code>; older <code>.snaptest</code> fixtures still run.</p>
+      <nav class="toc" aria-label="On this page">
+        <a href="#suite">Suite</a>
+        <a href="#test">Test</a>
+        <a href="#request">Request</a>
+        <a href="#body">Bodies</a>
+        <a href="#expect">Expect</a>
+        <a href="#save">SAVE / SET</a>
+        <a href="#wait">WAIT</a>
+        <a href="#legacy">Legacy</a>
+      </nav>
 
       <h2 id="suite">Suite</h2>
       <pre><code class="language-snaptest">SUITE: Book Store
@@ -64,7 +75,7 @@ IMPORT: shared.sapi</code></pre>
         <tbody>
           <tr><td><code>SUITE</code></td><td>Display name. Defaults to the file stem if omitted.</td></tr>
           <tr><td><code>DESC</code></td><td>Suite description, or test description when it sits under <code>TEST</code>.</td></tr>
-          <tr><td><code>URL</code></td><td>Base URL. May be overridden per test. Interpolates <code>${VAR}</code>.</td></tr>
+          <tr><td><code>URL</code></td><td>Base URL. Can be set per test. Interpolates <code>${VAR}</code>. <code>https://api.example.com</code> in samples is a placeholder — see <a href="your-api.html">Your API</a>.</td></tr>
           <tr><td><code>TIMEOUT</code></td><td>HTTP timeout in seconds for the suite.</td></tr>
           <tr><td><code>FOLLOW-REDIRECTS</code></td><td>Boolean. Also allowed on a step.</td></tr>
           <tr><td><code>OPTIONS</code></td><td>JSON object of suite options (<code>TIMEOUT</code>, <code>OPENAPI</code>, <code>VCR-MATCH</code>, …). Suite-level only; HTTP OPTIONS uses <code>REQUEST: OPTIONS /path</code>. Stop-on-failure is CLI-only: <code>-x</code> / <code>--stop-on-failure</code>.</td></tr>
@@ -212,8 +223,8 @@ EXPECT: json $.status == "ready" RETRY 20 BACKOFF 0.5s</code></pre>
         </tbody>
       </table>
       <div class="page-nav">
-        <a href="quick-start.html"><span>Previous</span>Quick start</a>
-        <a href="cli.html"><span>Next</span>CLI</a>
+        <a href="your-api.html" rel="prev"><span>Previous</span><strong>Your API</strong></a>
+        <a href="cli.html" rel="next"><span>Next</span><strong>CLI</strong></a>
       </div>
     </main>
   </div>

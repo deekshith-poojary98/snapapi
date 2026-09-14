@@ -1,0 +1,7 @@
+SUITE: Users
+URL: http://127.0.0.1:8765
+
+TEST: Create User
+  POST: /users
+  BODY: {"name": "Jane", "email": "jane@example.com"}
+  EXPECT: status == 201

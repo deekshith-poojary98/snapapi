@@ -1427,7 +1427,7 @@
       if (path === "/health" || path === "/ping") {
         if (m === "GET" || m === "HEAD") return json(200, { ok: true });
       }
-      if (path === "/api/users") {
+      if (path === "/api/users" || path === "/users") {
         if (m === "GET" || m === "HEAD") return json(200, listPayload(query.page));
         if (m === "POST") {
           var payload = body && typeof body === "object" ? body : {};
@@ -1444,7 +1444,7 @@
         }
         if (m === "OPTIONS") return json(204, null);
       }
-      var userMatch = path.match(/^\/api\/users\/([^/]+)$/);
+      var userMatch = path.match(/^\/(?:api\/)?users\/([^/]+)$/);
       if (userMatch) {
         var uid = userMatch[1];
         var numeric = String(parseInt(uid, 10)) === uid ? parseInt(uid, 10) : uid;
@@ -1673,7 +1673,7 @@
     if (live && !isMockUrl(suite.baseUrl)) {
       emit("Live fetch is on — requests go to " + suite.baseUrl + " (CORS may block them).", "warn");
     } else {
-      emit("Using in-memory mock API  (GET/POST /api/users, /health, /jobs/:id)", "dim");
+      emit("Using in-memory mock API  (GET /users or /api/users, /health, /jobs/:id)", "dim");
     }
 
     applySets(suite.sets, variables);
@@ -1915,6 +1915,42 @@
   }
 
   var SAMPLES = {
+    hello: {
+      label: "Hello (one GET)",
+      text:
+        "SUITE: Hello API\n" +
+        "URL: mock://api\n" +
+        "\n" +
+        "TEST: Get Users\n" +
+        "  GET: /users\n" +
+        "  EXPECT: status == 200\n",
+    },
+    post: {
+      label: "POST",
+      text:
+        "SUITE: Users\n" +
+        "URL: mock://api\n" +
+        "\n" +
+        "TEST: Create User\n" +
+        "  POST: /users\n" +
+        "  BODY: {\"name\": \"Jane\", \"email\": \"jane@example.com\"}\n" +
+        "  EXPECT: status == 201\n",
+    },
+    save: {
+      label: "SAVE then GET",
+      text:
+        "SUITE: Users\n" +
+        "URL: mock://api\n" +
+        "\n" +
+        "TEST: Create then fetch\n" +
+        "  POST: /users\n" +
+        "  BODY: {\"name\": \"Jane\", \"email\": \"jane@example.com\"}\n" +
+        "  EXPECT: status == 201\n" +
+        "  SAVE: userId FROM $.id\n" +
+        "  GET: /users/${userId}\n" +
+        "  EXPECT: status == 200\n" +
+        "  EXPECT: json $.email == \"jane@example.com\"\n",
+    },
     list: {
       label: "List users",
       text:

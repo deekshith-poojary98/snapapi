@@ -4,6 +4,25 @@ function assert(cond, msg) {
   if (!cond) throw new Error(msg);
 }
 
+async function testPost() {
+  const result = await pg.runText(pg.SAMPLES.post.text);
+  assert(result.ok, "post should pass\n" + result.text);
+  assert(result.passed === 1, "expected 1 passed, got " + result.passed);
+}
+
+async function testSaveChain() {
+  const result = await pg.runText(pg.SAMPLES.save.text);
+  assert(result.ok, "save chain should pass\n" + result.text);
+  assert(/saved userId=/.test(result.text), "should print saved userId");
+}
+
+async function testHello() {
+  const result = await pg.runText(pg.SAMPLES.hello.text);
+  assert(result.ok, "hello GET should pass\n" + result.text);
+  assert(result.passed === 1, "expected 1 passed, got " + result.passed);
+  assert(!/TOKEN|SAVE|SETUP|TAG/.test(pg.SAMPLES.hello.text), "hello sample must stay tiny");
+}
+
 async function testList() {
   const result = await pg.runText(pg.SAMPLES.list.text);
   assert(result.ok, "list users should pass\n" + result.text);
@@ -291,6 +310,9 @@ TEST: T
 }
 
 async function main() {
+  await testHello();
+  await testPost();
+  await testSaveChain();
   await testList();
   await testCreateSave();
   await testFail();

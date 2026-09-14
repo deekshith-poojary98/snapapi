@@ -1,0 +1,22 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/users",
+      "status": 200,
+      "json": { "data": [{ "id": 7, "name": "Ada" }] }
+    },
+    {
+      "method": "POST",
+      "path": "/users",
+      "status": 201,
+      "json": { "id": 7, "name": "Jane", "email": "jane@example.com" }
+    },
+    {
+      "method": "GET",
+      "path": "/users/{id}",
+      "status": 200,
+      "json": { "id": 7, "name": "Jane", "email": "jane@example.com" }
+    }
+  ]
+}

@@ -1,15 +1,70 @@
 # SnapAPI
 
-[![PyPI version](https://badge.fury.io/py/snapapi.svg)](https://badge.fury.io/py/snapapi)
+[![PyPI version](https://badge.fury.io/py/pysnapapi.svg)](https://pypi.org/project/pysnapapi/)
 [![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
 [![CI Tests](https://github.com/deekshith-poojary98/snapapi/actions/workflows/snapapi.yml/badge.svg)](https://github.com/deekshith-poojary98/snapapi/actions/workflows/snapapi.yml)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/deekshith-poojary98/snapapi)
 
 
-SnapAPI is a lightweight HTTP API testing framework with a small custom DSL.
-Write `.sapi` files, then run them from the CLI. The older `.snaptest` extension still works.
+SnapAPI is a small language for HTTP tests. Write a `.sapi` file, run `snapapi`, get PASS or FAIL.
 
-**[User guide](https://deekshith-poojary98.github.io/snapapi/)** — install, DSL reference, CLI, CI, VS Code, and an in-browser **[playground](https://deekshith-poojary98.github.io/snapapi/playground.html)**
+**Start here:** [playground](https://deekshith-poojary98.github.io/snapapi/playground.html) (no install) → [quick start](https://deekshith-poojary98.github.io/snapapi/guide/quick-start.html) (same GET on the CLI).
+
+The PyPI package is **`pysnapapi`**. The command is **`snapapi`**. `pip install snapapi` is a different project.
+
+## First PASS
+
+You need something that answers `GET /users`. `snapapi mock` is a tiny server for that — local, not the public internet.
+
+Create `mock.json`:
+
+```json
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/users",
+      "status": 200,
+      "json": { "data": [{ "id": 1, "name": "Ada" }] }
+    }
+  ]
+}
+```
+
+Create `hello.sapi`:
+
+```
+SUITE: Hello API
+URL: http://127.0.0.1:8765
+
+TEST: Get Users
+  GET: /users
+  EXPECT: status == 200
+```
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install pysnapapi
+snapapi --version
+
+snapapi mock mock.json --port 8765   # leave running
+snapapi hello.sapi
+```
+
+You want `1 passed  0 failed`. Same files in the repo: `examples/hello/mock.json` and `examples/hello/hello.sapi`.
+
+## After first PASS
+
+Guide pages, in order:
+
+1. [POST + BODY](https://deekshith-poojary98.github.io/snapapi/guide/post.html)
+2. [SAVE](https://deekshith-poojary98.github.io/snapapi/guide/save.html) an id, then `${userId}`
+3. [Env / AUTH](https://deekshith-poojary98.github.io/snapapi/guide/env.html)
+4. [HELPER / SETUP](https://deekshith-poojary98.github.io/snapapi/guide/helpers.html)
+5. [Your API](https://deekshith-poojary98.github.io/snapapi/guide/your-api.html) — put your real origin in `URL:`
+
+[Troubleshooting](https://deekshith-poojary98.github.io/snapapi/guide/troubleshooting.html) if you’re stuck. Flag tables below are reference.
 
 ## Features
 
@@ -29,8 +84,19 @@ Write `.sapi` files, then run them from the CLI. The older `.snaptest` extension
 
 ## Installation
 
+From PyPI (most people):
+
 ```bash
-git clone https://github.com/Deekshith-07/snapapi.git
+python3 -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install pysnapapi
+snapapi --version
+```
+
+From this repository (contributors):
+
+```bash
+git clone https://github.com/deekshith-poojary98/snapapi.git
 cd snapapi
 python3 -m venv .venv
 source .venv/bin/activate   # Windows: .venv\Scripts\activate
@@ -46,6 +112,8 @@ pip install -e .
 
 ## CLI
 
+After a green hello. You don’t need this table to get a first PASS.
+
 ```bash
 snapapi path/to/file.sapi
 python -m snapapi path/to/file.sapi
@@ -54,8 +122,9 @@ python -m snapapi path/to/file.sapi
 Pass multiple files or a directory of `.sapi` files:
 
 ```bash
-snapapi tests/test_suite.snaptest
-snapapi tests/ suites/auth.sapi
+snapapi examples/hello/hello.sapi
+snapapi examples/users/post.sapi
+snapapi tests/
 ```
 
 Options:
@@ -106,7 +175,7 @@ The process exits `0` when every test passed, `1` when a test failed, and `2` on
 
 ## DSL
 
-Recommended form:
+Recommended form (after you have a first PASS — see above). `https://api.example.com` is a **placeholder**, not a live host:
 
 ```
 SUITE: Book Store
@@ -298,6 +367,7 @@ snapapi/
 │   ├── api_client.py     # requests wrapper
 │   └── cli.py            # snapapi command
 ├── tests/                # pytest + sample .sapi / .snaptest suites
+├── examples/             # hello GET and users POST/SAVE/AUTH/HELPER
 ├── docs/                 # User guide + in-browser playground
 ├── snapapi-language/     # VS Code grammar / run command
 ├── pyproject.toml

@@ -13,12 +13,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/Deekshith-07/snapapi.git"
+    "url": "https://github.com/deekshith-poojary98/snapapi.git"
   },
   "bugs": {
-    "url": "https://github.com/Deekshith-07/snapapi/issues"
+    "url": "https://github.com/deekshith-poojary98/snapapi/issues"
   },
-  "homepage": "https://github.com/Deekshith-07/snapapi#readme",
+  "homepage": "https://github.com/deekshith-poojary98/snapapi#readme",
   "engines": {
     "vscode": "^1.91.0"
   },

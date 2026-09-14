@@ -15,48 +15,59 @@
   <div class="layout">
     <aside class="sidebar" id="site-sidebar">
       <a class="brand" href="../index.html"><span class="logo"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg></span><span class="wordmark">Snap<span class="brand-api">API</span></span></a>
-      <div class="nav-label">Guide</div>
-      <nav aria-label="Docs">
+      <div class="nav-label">Start</div>
+      <nav aria-label="Start">
         <a href="../index.html">Home</a>
-        <a href="../index.html#why">Why SnapAPI?</a>
         <a href="install.html">Install</a>
         <a href="quick-start.html">Quick start</a>
-        <a href="dsl.html">DSL reference</a>
+      </nav>
+      <div class="nav-label">Learn</div>
+      <nav aria-label="Learn">
+        <a href="post.html">POST</a>
+        <a href="save.html">SAVE</a>
+        <a href="env.html">Env / AUTH</a>
+        <a href="helpers.html">Helpers</a>
+        <a href="your-api.html">Your API</a>
+      </nav>
+      <div class="nav-label">Reference</div>
+      <nav aria-label="Reference">
+        <a href="dsl.html">DSL</a>
         <a class="active" href="cli.html">CLI</a>
-        <a href="ci.html">CI / reports</a>
+        <a href="ci.html">CI</a>
         <a href="vscode.html">VS Code</a>
+        <a href="troubleshooting.html">Troubleshooting</a>
         <a class="cta" href="../playground.html">Playground</a>
       </nav>
-      <p class="hint">snapapi file.sapi is the default command. Subcommands: lint, fmt, openapi, history, mock, watch. --listener attaches Python reporters.</p>
+      <p class="hint">snapapi PATH runs every .sapi file under PATH. Exit 0 pass, 1 fail, 2 usage.</p>
     </aside>
     <main class="content" id="main">
       <button class="menu-btn btn btn-ghost" type="button" data-menu aria-expanded="false" aria-controls="site-sidebar"><span class="menu-icon" aria-hidden="true"></span>Menu</button>
       <p class="kicker">Tooling</p>
       <h1>CLI</h1>
-      <p class="lede">The console script is <code>snapapi</code>. A path with no subcommand is treated as <code>run</code>. Selection and output flags follow pytest and Robot Framework where they fit: <code>-k</code>/<code>-m</code>, <code>-x</code>, <code>--maxfail</code>, <code>--lf</code>/<code>--ff</code>, <code>--collect-only</code>, <code>-q</code>/<code>-v</code>, <code>--exclude</code>, and <code>-D</code>.</p>
-      <pre><code class="language-bash">snapapi path/to/file.sapi
-python -m snapapi path/to/file.sapi
-snapapi tests/ suites/auth.sapi</code></pre>
+      <p class="lede"><code>snapapi path</code> runs the file (or every <code>.sapi</code> under a directory).</p>
+      <pre><code class="language-bash">snapapi examples/hello/hello.sapi
+python -m snapapi examples/hello/hello.sapi
+snapapi tests/</code></pre>
 
       <h2>run (default)</h2>
       <table>
         <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
         <tbody>
-          <tr><td><code>-k "Login or not Health"</code></td><td>Pytest-style keyword expression on name, description, and tags. <code>and</code>/<code>or</code>/<code>not</code> and parentheses. Adjacent words are AND.</td></tr>
-          <tr><td><code>-m "smoke and not slow"</code></td><td>Pytest-style tag expression.</td></tr>
+          <tr><td><code>-k "Login or not Health"</code></td><td>Filter by name, description, and tags. <code>and</code> / <code>or</code> / <code>not</code> and parentheses. Adjacent words are AND.</td></tr>
+          <tr><td><code>-m "smoke and not slow"</code></td><td>Filter by tag expression (<code>and</code> / <code>or</code> / <code>not</code>).</td></tr>
           <tr><td><code>--tag user</code></td><td>Run tests that have this tag (repeatable; all given tags must match).</td></tr>
-          <tr><td><code>--exclude slow</code></td><td>Skip tests with this tag (Robot <code>--exclude</code>; repeatable).</td></tr>
+          <tr><td><code>--exclude slow</code></td><td>Skip tests with this tag (repeatable).</td></tr>
           <tr><td><code>--name "Create User"</code></td><td>Run tests with this name (repeatable).</td></tr>
           <tr><td><code>--grep regex</code></td><td>Filter tests by name or description.</td></tr>
-          <tr><td><code>-D TOKEN=secret</code> / <code>--variable</code></td><td>Set <code>${VAR}</code> without an env file (Robot-style). Repeatable; overrides <code>--profile</code>.</td></tr>
+          <tr><td><code>-D TOKEN=secret</code> / <code>--variable</code></td><td>Set <code>${VAR}</code> without an env file. Repeatable; overrides <code>--profile</code>.</td></tr>
           <tr><td><code>--env .env</code></td><td>Load <code>KEY=VALUE</code> pairs for <code>${VAR}</code>. If omitted: <code>&lt;suite&gt;.env</code>, then <code>.env</code> beside the suite, then a single sibling <code>*.env</code>.</td></tr>
           <tr><td><code>--profile stage</code></td><td>Load <code>environments/stage.env</code>, <code>.snapapi/stage.env</code>, or <code>stage.env</code>.</td></tr>
           <tr><td><code>--timeout 10</code></td><td>HTTP timeout in seconds (overrides suite <code>TIMEOUT</code>).</td></tr>
-          <tr><td><code>-x</code> / <code>--exitfirst</code> / <code>--stop-on-failure</code></td><td>Stop each suite on the first failed test (pytest <code>-x</code>). Off by default: remaining tests keep running after a failure.</td></tr>
-          <tr><td><code>--maxfail N</code></td><td>Stop after N failures (pytest <code>--maxfail</code>).</td></tr>
+          <tr><td><code>-x</code> / <code>--exitfirst</code> / <code>--stop-on-failure</code></td><td>Stop each suite on the first failed test. Off by default: remaining tests keep running after a failure.</td></tr>
+          <tr><td><code>--maxfail N</code></td><td>Stop after N failures.</td></tr>
           <tr><td><code>--lf</code> / <code>--last-failed</code></td><td>Re-run failures from <code>.snapapi/last-run.json</code> (file + suite + name, including <code>Test [row]</code>).</td></tr>
           <tr><td><code>--ff</code> / <code>--failed-first</code></td><td>Run last-failed tests first, then the rest.</td></tr>
-          <tr><td><code>--collect-only</code> / <code>--co</code> / <code>--dry-run</code></td><td>Print selected tests without HTTP (pytest <code>--collect-only</code>, Robot <code>--dryrun</code>).</td></tr>
+          <tr><td><code>--collect-only</code> / <code>--co</code> / <code>--dry-run</code></td><td>Print selected tests without making HTTP calls.</td></tr>
           <tr><td><code>-q</code> / <code>-v</code></td><td>Quiet (summary only) or verbose. Repeatable.</td></tr>
           <tr><td><code>--durations N</code></td><td>Show the N slowest tests after the run (<code>0</code> = all).</td></tr>
           <tr><td><code>--color yes|no|auto</code> / <code>--no-color</code></td><td>Force or disable ANSI color.</td></tr>
@@ -93,6 +104,7 @@ snapapi fmt users.sapi --check</code></pre>
       <h2>openapi</h2>
       <p>Generate GET/POST/PUT/PATCH/DELETE smoke tests from an OpenAPI spec.</p>
       <pre><code class="language-bash">snapapi openapi spec.yaml --base-url https://api.example.com -o smoke.sapi</code></pre>
+      <p><code>https://api.example.com</code> is a placeholder — put the origin from your spec.</p>
       <p>Without <code>-o</code>, the suite is printed to stdout.</p>
 
       <h2>history</h2>
@@ -141,8 +153,8 @@ results = run_suites(["tests/foo.sapi"])
 assert all(suite.ok for suite in results)</code></pre>
       <p><code>run_suites</code> accepts the same options as <code>snapapi run</code> (tags, names, env file, timeout, workers, VCR mode, and the rest) as keyword arguments. It returns a list of suite results.</p>
       <div class="page-nav">
-        <a href="dsl.html"><span>Previous</span>DSL reference</a>
-        <a href="ci.html"><span>Next</span>CI / reports</a>
+        <a href="dsl.html" rel="prev"><span>Previous</span><strong>DSL reference</strong></a>
+        <a href="ci.html" rel="next"><span>Next</span><strong>CI / reports</strong></a>
       </div>
     </main>
   </div>

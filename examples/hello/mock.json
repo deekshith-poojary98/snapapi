@@ -1,0 +1,10 @@
+{
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/users",
+      "status": 200,
+      "json": { "data": [{ "id": 1, "name": "Ada" }] }
+    }
+  ]
+}

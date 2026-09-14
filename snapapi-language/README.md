@@ -1,6 +1,6 @@
 # SnapAPI Language Support
 
-Editor support for [SnapAPI](https://github.com/Deekshith-07/snapapi) `.sapi` files — the HTTP testing DSL. The older `.snaptest` extension still works.
+Editor support for [SnapAPI](https://github.com/deekshith-poojary98/snapapi) `.sapi` files — the HTTP testing DSL. The older `.snaptest` extension still works.
 
 ## Features
 
@@ -18,15 +18,9 @@ Keywords follow the Python parser. Random English words are not highlighted; ass
 
 ## Install
 
-### From this repo (debug)
+This extension is **not on the VS Code Marketplace**. There is no listing to search for.
 
-1. Open the `snapapi-language` folder in VS Code / Cursor.
-2. Press **F5** to launch an Extension Development Host.
-3. Open a `.sapi` file.
-
-If the workspace is the SnapAPI repo root, set the launch argument to `--extensionDevelopmentPath=${workspaceFolder}/snapapi-language`.
-
-### Copy into extensions
+Copy the folder from [deekshith-poojary98/snapapi](https://github.com/deekshith-poojary98/snapapi):
 
 ```bash
 cp -R snapapi-language ~/.vscode/extensions/deekshithpoojary.snapapi-language-0.1.0
@@ -43,7 +37,15 @@ npx @vscode/vsce package
 code --install-extension snapapi-language-0.1.0.vsix
 ```
 
-The CLI must be installed separately (`pip install -e .` from the repo root, or put `snapapi` on your `PATH`).
+The CLI must be installed separately (`pip install pysnapapi`, or `pip install -e .` from the repo root). GUI editors often omit the venv from `PATH`.
+
+### Contributor debug
+
+1. Open the `snapapi-language` folder in VS Code / Cursor.
+2. Press **F5** to launch an Extension Development Host.
+3. Open a `.sapi` file.
+
+If the workspace is the SnapAPI repo root, set the launch argument to `--extensionDevelopmentPath=${workspaceFolder}/snapapi-language`.
 
 ## Settings
 
