@@ -104,7 +104,7 @@
       <p>If your tests need complex programming logic, custom cryptography inside the suite, extensive Python fixtures, WebSockets, gRPC, or highly customized execution flows, keep your existing framework.</p>
       <p>SnapAPI is for teams whose API tests mostly look like:</p>
       <p class="pitch"><strong>request → assert → extract → request → assert</strong></p>
-      <p>If that’s 80% of your suite, SnapAPI makes that 80% easier to read, review, and maintain. The other 20% stays in Python — <a href="guide/plugins.html"><code>CALL</code></a> from <code>extensions/</code> for one ugly value, or pytest around the runner. Not <code>IF</code> / <code>FOR</code> / <code>WHILE</code> in the <code>.sapi</code> file.</p>
+      <p>If that’s 80% of your suite, SnapAPI makes that 80% easier to read, review, and maintain. The other 20% stays in Python — <a href="guide/plugins.html"><code>CALL</code></a> from <code>extensions/</code> for one ugly value, or pytest around the runner. The <code>.sapi</code> file still describes HTTP; Python does not leak into the test language. Not <code>IF</code> / <code>FOR</code> / <code>WHILE</code> in the file.</p>
       <p>The longer version: <a href="guide/not-for-you.html">When SnapAPI is not for you</a>.</p>
 
       <h2>What it looks like</h2>

@@ -1,0 +1,23 @@
+{
+  "warnings": [],
+  "suite_name": "Users",
+  "must_contain": [
+    "AUTH: bearer ${TOKEN}",
+    "BODY: {\"name\": \"Jane\", \"email\": \"jane@example.com\"}"
+  ],
+  "must_not_contain": [
+    "HEADER Authorization:",
+    "Bearer $TOKEN"
+  ],
+  "semantic": {
+    "base_url": "https://api.example.com",
+    "method": "POST",
+    "endpoint": "/users",
+    "auth": "bearer ${TOKEN}",
+    "prefer_auth": true,
+    "headers": {"Content-Type": "application/json"},
+    "headers_absent": ["Authorization"],
+    "body": {"name": "Jane", "email": "jane@example.com"},
+    "body_type": "json"
+  }
+}

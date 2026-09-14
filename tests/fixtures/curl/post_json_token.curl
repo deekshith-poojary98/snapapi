@@ -1,0 +1,5 @@
+curl 'https://api.example.com/users' \
+  -X POST \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer $TOKEN' \
+  -d '{"name":"Jane","email":"jane@example.com"}'

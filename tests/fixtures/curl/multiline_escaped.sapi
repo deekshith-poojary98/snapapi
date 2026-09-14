@@ -1,0 +1,7 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Get Items
+  GET: /items
+  HEADER Accept: application/json
+  HEADER X-Env: stage

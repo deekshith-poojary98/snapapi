@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import copy
 import inspect
 import json
 import re
 from pathlib import Path
 
-from snapapi.exceptions import SnapAPIError
+from snapapi.exceptions import CallError, SnapAPIError
 from snapapi.listeners import _import_target, _split_spec
 
 BUILTIN_HELPERS = frozenset({"uuid", "now", "random.int"})
@@ -161,27 +162,54 @@ def build_registry(suite_path=None, plugins=None, specs=None):
     return registry
 
 
-def invoke_extension(fn, name, args):
+def invoke_extension(fn, name, args, test=None):
+    if inspect.iscoroutinefunction(fn) or inspect.isasyncgenfunction(fn):
+        raise CallError(name, "async functions are not supported", test=test)
+    call_args = [_call_arg(arg) for arg in args]
     try:
-        result = fn(*args)
-    except SnapAPIError:
-        raise
+        result = fn(*call_args)
+    except CallError as exc:
+        raise exc.with_test(test) from None
     except Exception as exc:
-        raise SnapAPIError(f"{name}() failed: {exc}") from exc
+        message = str(exc).strip() or type(exc).__name__
+        raise CallError(name, message, test=test) from None
+    if inspect.iscoroutine(result):
+        result.close()
+        raise CallError(name, "async functions are not supported", test=test)
+    if inspect.isasyncgen(result):
+        closer = result.aclose()
+        if inspect.iscoroutine(closer):
+            closer.close()
+        raise CallError(name, "async functions are not supported", test=test)
+    if inspect.isgenerator(result):
+        result.close()
+        raise CallError(
+            name,
+            "must return a string, number, bool, object, or array, not generator",
+            test=test,
+        )
     if result is None:
-        raise SnapAPIError(f"{name}() returned None")
+        raise CallError(name, "returned None", test=test)
     if isinstance(result, bytes):
         try:
             return result.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise SnapAPIError(f"{name}() returned non-UTF-8 bytes") from exc
+        except UnicodeDecodeError:
+            raise CallError(name, "returned non-UTF-8 bytes", test=test) from None
     if isinstance(result, (str, int, float, bool, dict, list)):
         return result
     if isinstance(result, tuple):
         return list(result)
-    raise SnapAPIError(
-        f"{name}() must return a string, number, object, or array, not {type(result).__name__}"
+    raise CallError(
+        name,
+        f"must return a string, number, bool, object, or array, not {type(result).__name__}",
+        test=test,
     )
+
+
+def _call_arg(arg):
+    if isinstance(arg, (dict, list)):
+        return copy.deepcopy(arg)
+    return arg
 
 
 def format_extension_value(value):

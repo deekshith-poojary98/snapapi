@@ -434,6 +434,7 @@ h3 {
   gap: 0.75rem;
   margin: 0.4rem 0 1.2rem;
 }
+.split-3 { grid-template-columns: 1fr 1fr 1fr; }
 .split > div {
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -443,8 +444,13 @@ h3 {
 .split h3 { margin: 0 0 0.5rem; font-size: 1rem; }
 .split ul { margin: 0; padding-left: 1.15rem; color: var(--muted); }
 .split li { margin: 0.3rem 0; }
+.split p { margin: 0; color: var(--muted); font-size: 0.92rem; }
+.split pre { margin: 0 0 0.65rem; }
+@media (max-width: 900px) {
+  .split-3 { grid-template-columns: 1fr; }
+}
 @media (max-width: 720px) {
-  .why-grid, .split { grid-template-columns: 1fr; }
+  .why-grid, .split, .split-3 { grid-template-columns: 1fr; }
   td:first-child { white-space: normal; }
 }
 .callout {

@@ -1,0 +1,4 @@
+curl 'https://api.example.com/users?page=2' \
+  -X GET \
+  -H 'Authorization: Bearer abc123' \
+  -H 'Content-Type: application/json'

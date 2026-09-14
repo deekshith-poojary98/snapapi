@@ -1,0 +1,1 @@
+curl https://api.example.com/upload -F 'file=@./photo.png' -F 'note=hi'

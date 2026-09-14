@@ -1,0 +1,6 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Get Tags
+  GET: /tags
+  QUERY: tag=a&tag=b

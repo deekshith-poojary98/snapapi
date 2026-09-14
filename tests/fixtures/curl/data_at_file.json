@@ -1,0 +1,12 @@
+{
+  "warnings_contain": [
+    "Body from file"
+  ],
+  "must_contain": [
+    "${FILE_BODY}"
+  ],
+  "must_not_contain": [
+    "@payload.json",
+    "BODY: @payload.json"
+  ]
+}

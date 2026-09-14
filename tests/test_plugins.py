@@ -189,3 +189,161 @@ def test_zero_arg_plugin():
         return "ok"
 
     assert interpolate("${stamp()}", {}, plugins={"stamp": stamp}) == "ok"
+
+
+def test_invoke_rejects_none_and_async():
+    from snapapi.exceptions import CallError
+    from snapapi.plugins import invoke_extension
+
+    def nothing():
+        return None
+
+    with pytest.raises(CallError, match="returned None"):
+        invoke_extension(nothing, "nothing", [])
+
+    async def later():
+        return "nope"
+
+    with pytest.raises(CallError, match="async functions are not supported"):
+        invoke_extension(later, "later", [])
+
+
+def test_invoke_translates_exception_without_traceback():
+    from snapapi.exceptions import CallError
+    from snapapi.plugins import invoke_extension
+
+    def boom(secret):
+        raise ValueError("Invalid secret")
+
+    with pytest.raises(CallError) as caught:
+        invoke_extension(boom, "crypto.generate_signature", ["x"], test="Create Payment")
+    text = str(caught.value)
+    assert "CALL FAILED" in text
+    assert "Function: crypto.generate_signature" in text
+    assert "Test: Create Payment" in text
+    assert "Error: Invalid secret" in text
+    assert "Traceback" not in text
+    assert caught.value.__cause__ is None
+
+
+def test_invoke_copies_object_arguments():
+    from snapapi.plugins import invoke_extension
+
+    def bump(user):
+        user["n"] += 1
+        return user
+
+    original = {"n": 1}
+    out = invoke_extension(bump, "bump", [original])
+    assert out == {"n": 2}
+    assert original == {"n": 1}
+
+
+def test_call_failure_prints_call_failed(http_server, tmp_path, capsys):
+    http_server.on("GET", "/ok", json={"ok": True})
+    ext = tmp_path / "extensions"
+    ext.mkdir()
+    (ext / "crypto.py").write_text(
+        "def generate_signature(payload, secret):\n"
+        "    raise ValueError('Invalid secret')\n",
+        encoding="utf-8",
+    )
+    suite = tmp_path / "one.sapi"
+    suite.write_text(
+        f"SUITE: Pay\nURL: {http_server.base_url}\n"
+        "TEST: Create Payment\n"
+        "  CALL: signature = crypto.generate_signature(body, bad)\n"
+        "  GET: /ok\n  EXPECT: status == 200\n",
+        encoding="utf-8",
+    )
+    results = run_suites([suite])
+    output = capsys.readouterr().out
+    error = results[0].tests[0].error or ""
+    assert not results[0].ok
+    assert "CALL FAILED" in error
+    assert "Function: crypto.generate_signature" in error
+    assert "Test: Create Payment" in error
+    assert "Error: Invalid secret" in error
+    assert "CALL FAILED" in output
+    assert "Create Payment" in output
+    assert "Traceback" not in output
+    assert "File " not in error
+    assert "Traceback" not in error
+
+
+def test_call_none_fails_the_test(http_server, tmp_path):
+    http_server.on("GET", "/ok", json={"ok": True})
+    ext = tmp_path / "extensions"
+    ext.mkdir()
+    (ext / "testdata.py").write_text(
+        "def generate_user():\n    return None\n",
+        encoding="utf-8",
+    )
+    suite = tmp_path / "one.sapi"
+    suite.write_text(
+        f"SUITE: Users\nURL: {http_server.base_url}\n"
+        "TEST: Create\n"
+        "  CALL: user = generate_user()\n"
+        "  GET: /ok\n  EXPECT: status == 200\n",
+        encoding="utf-8",
+    )
+    results = run_suites([suite])
+    error = results[0].tests[0].error or ""
+    assert not results[0].ok
+    assert "CALL FAILED" in error
+    assert "returned None" in error
+
+
+def test_call_does_not_mutate_snapapi_variables(http_server):
+    http_server.on("POST", "/users", json={"ok": True})
+
+    def generate_user():
+        return {"n": 1}
+
+    def bump(user):
+        user["n"] += 1
+        return user
+
+    result, engine, _ = run_dsl(
+        f"""
+SUITE: Users
+URL: {http_server.base_url}
+TEST: Create
+  CALL: user = generate_user()
+  CALL: nxt = bump(${{user}})
+  POST: /users
+  BODY: ${{user}}
+  EXPECT: status == 200
+""",
+        plugins={"generate_user": generate_user, "bump": bump},
+    )
+    assert result.ok
+    assert engine.variables["user"] == {"n": 1}
+    assert engine.variables["nxt"] == {"n": 2}
+    assert http_server.requests[-1]["json"] == {"n": 1}
+
+
+def test_suite_call_failure_stops_run(http_server, tmp_path):
+    http_server.on("GET", "/ok", json={"ok": True})
+    ext = tmp_path / "extensions"
+    ext.mkdir()
+    (ext / "crypto.py").write_text(
+        "def generate_signature():\n    raise ValueError('Invalid secret')\n",
+        encoding="utf-8",
+    )
+    suite = tmp_path / "one.sapi"
+    suite.write_text(
+        f"SUITE: Pay\nURL: {http_server.base_url}\n"
+        "CALL: signature = crypto.generate_signature()\n"
+        "TEST: Create Payment\n"
+        "  GET: /ok\n  EXPECT: status == 200\n",
+        encoding="utf-8",
+    )
+    results = run_suites([suite])
+    assert not results[0].ok
+    assert results[0].tests == []
+    error = results[0].error or ""
+    assert "CALL FAILED" in error
+    assert "Function: crypto.generate_signature" in error
+    assert "Error: Invalid secret" in error
+    assert "Test:" not in error

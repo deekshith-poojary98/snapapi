@@ -8,7 +8,7 @@
 
 SnapAPI is a small language for HTTP tests. Write a `.sapi` file, run `snapapi`, get PASS or FAIL.
 
-It is not a replacement for every API framework. If your tests are mostly **request → assert → extract → request → assert**, that's the 80% SnapAPI is for. Loops, custom crypto inside the suite, WebSockets, gRPC, or importing 2,000 existing cases: keep the tool you have. One ugly value is [`CALL`](https://deekshith-poojary98.github.io/snapapi/guide/plugins.html) from `extensions/`. There is no `IF` / `FOR` / `WHILE` in the file — [when SnapAPI is not for you](https://deekshith-poojary98.github.io/snapapi/guide/not-for-you.html).
+It is not a replacement for every API framework. If your tests are mostly **request → assert → extract → request → assert**, that's the 80% SnapAPI is for. Loops, custom crypto inside the suite, WebSockets, gRPC, or importing 2,000 existing cases: keep the tool you have. Need more power? [`CALL`](https://deekshith-poojary98.github.io/snapapi/guide/plugins.html) a Python extension and bring the result back — don't grow the test language. There is no `IF` / `FOR` / `WHILE` in the file — [when SnapAPI is not for you](https://deekshith-poojary98.github.io/snapapi/guide/not-for-you.html).
 
 **Start here:** [playground](https://deekshith-poojary98.github.io/snapapi/playground.html) (no install) → [quick start](https://deekshith-poojary98.github.io/snapapi/guide/quick-start.html) (same GET on the CLI).
 
@@ -170,6 +170,7 @@ Options:
 | `--cacert PATH` | CA bundle used to verify TLS |
 | `snapapi lint PATH` | Parse/validate without HTTP |
 | `snapapi fmt PATH` | Format `.sapi` files |
+| `snapapi convert 'curl …'` / `file.sh` / `--clipboard` | Convert curl to a `.sapi` suite |
 | `snapapi openapi spec.yaml` | Generate GET/POST/PUT/PATCH/DELETE smoke tests |
 | `snapapi history [--failed] [--since 7d]` | Print `.snapapi/history.jsonl` |
 | `snapapi mock mock.json [--port 0]` | Serve routes from a JSON mock file (prints the URL) |

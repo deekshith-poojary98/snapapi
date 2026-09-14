@@ -1,0 +1,1 @@
+curl --upload-file huge.bin https://api.example.com/upload

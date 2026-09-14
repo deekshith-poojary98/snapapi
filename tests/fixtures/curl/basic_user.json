@@ -1,0 +1,16 @@
+{
+  "warnings": [],
+  "must_contain": [
+    "AUTH: basic alice:secret"
+  ],
+  "must_not_contain": [
+    "HEADER Authorization:"
+  ],
+  "semantic": {
+    "method": "GET",
+    "endpoint": "/me",
+    "auth": "basic alice:secret",
+    "prefer_auth": true,
+    "headers_absent": ["Authorization"]
+  }
+}

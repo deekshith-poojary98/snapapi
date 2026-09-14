@@ -38,12 +38,14 @@ def generate_smoke(spec_path, base_url=None, output=None):
             name = name.replace(":", " ")
             resolved, query = _apply_parameters(path, op, path_params)
             lines.append(f"TEST: {name}")
+            lines.append("  TAG: smoke")
             lines.append(f"  {method.upper()}: {resolved}")
             if query:
                 pairs = "&".join(f"{key}={value}" for key, value in query.items())
                 lines.append(f"  QUERY: {pairs}")
             if method in ("post", "put", "patch"):
                 body = _request_body_example(op)
+                lines.append("  HEADER Content-Type: application/json")
                 lines.append(f"  BODY: {json.dumps(body)}")
             lines.append(f"  EXPECT: status == {_first_2xx(op)}")
             lines.append("")

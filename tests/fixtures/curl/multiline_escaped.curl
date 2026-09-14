@@ -1,0 +1,3 @@
+curl -sS https://api.example.com/items \
+  -H 'Accept: application/json' \
+  -H 'X-Env: stage'

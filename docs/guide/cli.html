@@ -73,7 +73,7 @@ snapapi tests/</code></pre>
           <tr><td><code>-q</code> / <code>-v</code></td><td>Quiet (summary only) or verbose. Repeatable.</td></tr>
           <tr><td><code>--durations N</code></td><td>Show the N slowest tests after the run (<code>0</code> = all).</td></tr>
           <tr><td><code>--color yes|no|auto</code> / <code>--no-color</code></td><td>Force or disable ANSI color.</td></tr>
-          <tr><td><code>--workers N</code></td><td>Run independent tests in parallel. SAVE is isolated per test; sibling SAVE or any <code>DEPENDS</code> falls back to sequential. <code>DEPENDS</code> also pulls named tests forward (file order otherwise).</td></tr>
+          <tr><td><code>--workers N</code></td><td>Run independent tests in parallel (threads in one process). SAVE is isolated per test; sibling SAVE or any <code>DEPENDS</code> falls back to sequential. <code>DEPENDS</code> also pulls named tests forward (file order otherwise). Plugin functions must be thread-safe: module-level mutable state is shared. SnapAPI variables are not. See <a href="plugins.html#state">CALL</a>.</td></tr>
           <tr><td><code>--reruns N</code></td><td>Re-run failed tests up to N times (distinct from <code>EXPECT RETRY</code>).</td></tr>
           <tr><td><code>--include-skipped</code> / <code>--include-quarantine</code></td><td>Run tests marked SKIP or QUARANTINE.</td></tr>
           <tr><td><code>--mode record|replay|record-on-miss</code></td><td>VCR cassettes under <code>.snapapi/cassettes/</code>.</td></tr>
@@ -110,6 +110,14 @@ snapapi fmt users.sapi --check</code></pre>
       <pre><code class="language-bash">snapapi openapi spec.yaml --base-url https://api.example.com -o smoke.sapi</code></pre>
       <p><code>https://api.example.com</code> is a placeholder — put the origin from your spec.</p>
       <p>Without <code>-o</code>, the suite is printed to stdout.</p>
+
+      <h2>convert</h2>
+      <p>Turn existing curl into a <code>.sapi</code> suite. Intent is mapped when possible (<code>Authorization: Bearer</code> → <code>AUTH: bearer</code>, query string → <code>QUERY</code>, JSON <code>-d</code> → <code>BODY</code>). Unsupported curl features print a review warning on stderr instead of silently inventing DSL.</p>
+      <pre><code class="language-bash">snapapi convert 'curl https://api.example.com/users -H "Authorization: Bearer $TOKEN"'
+snapapi convert request.sh -o users.sapi
+snapapi convert --clipboard -o pasted.sapi
+snapapi convert request.sh --suite Users --expect 200 -q</code></pre>
+      <p>Pass a curl string, a shell file with one or more curl commands, or <code>--clipboard</code>. Without <code>-o</code>, the suite goes to stdout. Exit <code>2</code> on parse/usage errors.</p>
 
       <h2>history</h2>
       <pre><code class="language-bash">snapapi history

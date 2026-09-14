@@ -209,7 +209,7 @@ SET: orderId ${uuid()}</code></pre>
       <p>The playground seeds <code>${TOKEN}</code> as <code>playground-token</code> so bearer samples run without an env file. Plugins are CLI-only.</p>
 
       <h2 id="plugins">Plugins</h2>
-      <p>A plugin is a Python function loaded from <code>extensions/</code> (or <code>snapapi.yaml</code> / <code>--plugin</code>). The suite calls it with <code>CALL: signature = crypto.generate_signature(${PAYLOAD}, ${SECRET})</code> and uses <code>${signature}</code>. Arguments are explicit. There is no <code>IF</code> / <code>FOR</code> / <code>WHILE</code> — see <a href="not-for-you.html">When SnapAPI is not for you</a>.</p>
+      <p>A plugin is a Python function loaded from <code>extensions/</code> (or <code>snapapi.yaml</code> / <code>--plugin</code>). The suite calls it with <code>CALL: signature = crypto.generate_signature(${PAYLOAD}, ${SECRET})</code> and uses <code>${signature}</code>. Arguments are explicit. The function returns a value; it does not mutate SnapAPI variables, assert, or issue the HTTP under test. <code>CALL</code> is computation, not a second HTTP engine. Exceptions fail that test as <code>CALL FAILED</code>, not a traceback. There is no <code>IF</code> / <code>FOR</code> / <code>WHILE</code> — see <a href="not-for-you.html">When SnapAPI is not for you</a> and <a href="plugins.html">CALL</a>.</p>
 
       <h2 id="wait">WAIT and retries</h2>
       <pre><code class="language-snaptest">WAIT: json $.status == "ready" TIMEOUT 10s BACKOFF 0.5s

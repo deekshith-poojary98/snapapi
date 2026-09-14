@@ -52,15 +52,17 @@
       <p>If this works:</p>
       <pre><code class="language-bash">curl -sS https://api.myapp.com/users \
   -H "Authorization: Bearer $TOKEN"</code></pre>
+      <p>convert it:</p>
+      <pre><code class="language-bash">snapapi convert 'curl -sS https://api.myapp.com/users -H "Authorization: Bearer $TOKEN"' -o my.sapi</code></pre>
       <p>that’s this suite:</p>
-      <pre><code class="language-snaptest">SUITE: My API
+      <pre><code class="language-snaptest">SUITE: Converted Request
 URL: https://api.myapp.com
 
-TEST: List users
+TEST: Get Users
   GET: /users
-  AUTH: bearer ${TOKEN}
-  EXPECT: status == 200</code></pre>
+  AUTH: bearer ${TOKEN}</code></pre>
       <pre><code class="language-bash">snapapi my.sapi -D TOKEN="$TOKEN"</code></pre>
+      <p>Then add <code>EXPECT</code>, <code>SAVE</code>, and helpers. Curl is the on-ramp; SnapAPI is the maintainable test. It will not import a full Karate/Postman suite — only the requests you already curl.</p>
       <p>The rest maps the obvious way:</p>
       <table>
         <thead><tr><th>curl</th><th>SnapAPI</th></tr></thead>

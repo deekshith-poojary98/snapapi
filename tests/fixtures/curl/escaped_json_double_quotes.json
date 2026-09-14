@@ -1,0 +1,12 @@
+{
+  "warnings": [],
+  "must_contain": [
+    "BODY: {\"name\": \"Jane\"}"
+  ],
+  "semantic": {
+    "method": "POST",
+    "endpoint": "/users",
+    "body": {"name": "Jane"},
+    "body_type": "json"
+  }
+}

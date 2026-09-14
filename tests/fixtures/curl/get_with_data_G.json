@@ -1,0 +1,11 @@
+{
+  "warnings": [],
+  "must_contain": [
+    "QUERY: q=snap&limit=10"
+  ],
+  "semantic": {
+    "method": "GET",
+    "endpoint": "/search",
+    "query": {"q": "snap", "limit": "10"}
+  }
+}

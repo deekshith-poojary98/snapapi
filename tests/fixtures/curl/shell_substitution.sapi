@@ -1,0 +1,6 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Create X
+  POST: /x
+  BODY: raw text/plain ${SHELL_OUTPUT}

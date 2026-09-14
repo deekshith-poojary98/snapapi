@@ -11,6 +11,7 @@ from snapapi.fmt import format_file
 from snapapi.history import append_history, format_history, read_history, read_last_failed, write_last_run
 from snapapi.lint import format_issues, lint_files
 from snapapi.listeners import finish_listeners, load_listeners, notify
+from snapapi.convert import convert_curl, format_warnings, read_clipboard
 from snapapi.openapi import generate_smoke
 from snapapi.plugins import build_registry, load_plugins
 from snapapi.parser import TestParser
@@ -52,6 +53,15 @@ def build_parser():
     openapi.add_argument("spec")
     openapi.add_argument("--base-url")
     openapi.add_argument("-o", "--output")
+
+    convert = sub.add_parser("convert", help="Convert curl command(s) to a .sapi suite")
+    convert.add_argument("source", nargs="?", help="curl command string, or a file containing curl")
+    convert.add_argument("--clipboard", action="store_true", help="Read curl from the system clipboard")
+    convert.add_argument("--suite", dest="suite_name", help="SUITE name (default: Converted Request)")
+    convert.add_argument("--test", dest="test_name", help="TEST name (single curl only)")
+    convert.add_argument("--expect", dest="expect_status", type=int, help="Add EXPECT: status == N")
+    convert.add_argument("-o", "--output", help="Write .sapi to this path instead of stdout")
+    convert.add_argument("-q", "--quiet", action="store_true", help="Do not print conversion warnings to stderr")
 
     history = sub.add_parser("history", help="Show recent run history from .snapapi/history.jsonl")
     history.add_argument("--failed", action="store_true")
@@ -269,7 +279,7 @@ def main(argv=None):
 
         print(f"snapapi {__version__}")
         return 0
-    if argv and argv[0] in ("lint", "fmt", "openapi", "run", "history", "mock", "watch"):
+    if argv and argv[0] in ("lint", "fmt", "openapi", "convert", "run", "history", "mock", "watch"):
         command = argv[0]
         rest = argv[1:]
     else:
@@ -283,6 +293,8 @@ def main(argv=None):
             return _cmd_fmt(rest)
         if command == "openapi":
             return _cmd_openapi(rest)
+        if command == "convert":
+            return _cmd_convert(rest)
         if command == "history":
             return _cmd_history(rest)
         if command == "mock":
@@ -519,6 +531,38 @@ def _cmd_openapi(argv):
     text = generate_smoke(args.spec, base_url=args.base_url, output=args.output)
     if not args.output:
         print(text, end="")
+    return 0
+
+
+def _cmd_convert(argv):
+    parser = argparse.ArgumentParser(prog="snapapi convert")
+    parser.add_argument("source", nargs="?", help="curl command string, or a file containing curl")
+    parser.add_argument("--clipboard", action="store_true", help="Read curl from the system clipboard")
+    parser.add_argument("--suite", dest="suite_name", help="SUITE name (default: Converted Request)")
+    parser.add_argument("--test", dest="test_name", help="TEST name (single curl only)")
+    parser.add_argument("--expect", dest="expect_status", type=int, help="Add EXPECT: status == N")
+    parser.add_argument("-o", "--output", help="Write .sapi to this path instead of stdout")
+    parser.add_argument("-q", "--quiet", action="store_true", help="Do not print conversion warnings to stderr")
+    args = parser.parse_args(argv)
+    if args.clipboard and args.source:
+        raise SnapAPIError("Pass either a source or --clipboard, not both")
+    if args.clipboard:
+        source = read_clipboard()
+    elif args.source:
+        source = args.source
+    else:
+        raise SnapAPIError("Pass a curl string, a file path, or --clipboard")
+    result = convert_curl(
+        source,
+        suite_name=args.suite_name,
+        test_name=args.test_name,
+        output=args.output,
+        expect_status=args.expect_status,
+    )
+    if not args.quiet and result.warnings:
+        print(format_warnings(result.warnings), file=sys.stderr, end="")
+    if not args.output:
+        print(result.text, end="")
     return 0
 
 

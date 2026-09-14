@@ -74,7 +74,8 @@
 
       <h2>The language stays small</h2>
       <p>There is no <code>IF</code>, <code>FOR</code>, <code>WHILE</code>, or <code>TRY</code> in <code>.sapi</code> files. Adding those would make the file a worse Python, and you’d lose the reason to use SnapAPI.</p>
-      <p>One ugly value — an HMAC, a weird timestamp — belongs in <a href="plugins.html"><code>CALL</code></a>. Python lives in <code>extensions/</code>. The suite never names a <code>.py</code> file. It cannot skip steps, fire extra requests, or branch the suite.</p>
+      <p>Need more power? Leave the test language alone. <a href="plugins.html"><code>CALL</code></a> a Python extension and bring the result back. <code>CALL</code> is for computation, not for driving the system under test. <code>.sapi</code> describes what the API test does. Python handles the one weird value.</p>
+      <p>The suite never names a <code>.py</code> file. The function returns a value; it does not mutate SnapAPI state, skip steps, fire extra requests, or branch the suite.</p>
       <p>Listeners and <code>run_suites()</code> wrap the run. Plugins fill a hole <em>inside</em> a request. Pytest stays the hatch for everything else.</p>
 
       <h2>The test that matters</h2>

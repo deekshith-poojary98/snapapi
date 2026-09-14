@@ -1,0 +1,6 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Get Me
+  GET: /me
+  AUTH: basic alice:secret

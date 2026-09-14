@@ -1,0 +1,6 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Get Path With Space
+  GET: /path with space
+  HEADER X-Foo: bar baz

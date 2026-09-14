@@ -1,0 +1,7 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Get X
+  GET: /x
+  HEADER X-Request-Id: abc
+  HEADER Accept: application/json

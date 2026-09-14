@@ -1,0 +1,7 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Get X
+  GET: /x
+  HEADER User-Agent: SnapBot/1.0
+  HEADER Referer: https://example.com/

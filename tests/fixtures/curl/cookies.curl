@@ -1,0 +1,1 @@
+curl https://api.example.com/x -b 'session=abc; theme=dark'

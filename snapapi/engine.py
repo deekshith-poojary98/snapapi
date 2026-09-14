@@ -20,7 +20,7 @@ from requests.auth import HTTPDigestAuth
 
 from snapapi.api_client import APIClient, open_files
 from snapapi.cassette import cassette_key, load_cassettes, parse_vcr_match, save_cassette
-from snapapi.exceptions import JsonPathError, SnapAPIError, XPathError
+from snapapi.exceptions import CallError, JsonPathError, SnapAPIError, XPathError
 from snapapi.listeners import notify
 from snapapi.openapi import collect_parameters, load_spec, match_operation, request_body_schema, response_schema
 from snapapi.parser import walk_expect_checks
@@ -305,7 +305,21 @@ class Engine:
             self._print(self._paint(self.suite["description"], Style.DIM))
         if self.verbosity >= 1 and self.env_file:
             self._print(self._paint(f"  env {self.env_file}", Style.DIM))
-        self._apply_preps(self.suite)
+        try:
+            self._apply_preps(self.suite)
+        except SnapAPIError as exc:
+            self._print_error(str(exc), under_request=False)
+            label = "CALL" if isinstance(exc, CallError) else "SUITE"
+            suite_result = SuiteResult(
+                name=self.suite.get("name"),
+                source=self.suite.get("source"),
+                tests=[],
+                duration_ms=(time.perf_counter() - started) * 1000,
+                error=str(exc),
+                error_name=label,
+            )
+            self.print_summary(suite_result)
+            return suite_result
         self._notify("start_suite", self._suite_info())
 
         results = []
@@ -428,9 +442,12 @@ class Engine:
         if failed_rows:
             self._print(self._paint("  Failed:", Fore.RED))
             for test_name, error in failed_rows:
+                lines = (error or "failed").splitlines() or ["failed"]
                 self._print(
-                    f"    {self._paint('- ' + test_name + ':', Fore.RED)} {self._paint(error or 'failed', Fore.RED)}"
+                    f"    {self._paint('- ' + test_name + ':', Fore.RED)} {self._paint(lines[0], Fore.RED)}"
                 )
+                for extra in lines[1:]:
+                    self._print(f"      {self._paint(extra, Fore.RED)}")
         self._print()
 
     def _run_examples(self, test):
@@ -628,7 +645,9 @@ class Engine:
                 error = str(exc)
             if announce:
                 self._announce(test, role)
-            if test.get("setup"):
+            if error:
+                self._print_error(error, under_request=False)
+            if error is None and test.get("setup"):
                 setup_result = self._run_test(test["setup"], role="setup")
                 collected.extend(setup_result.requests)
                 if setup_result.status == "failed":
@@ -1275,7 +1294,8 @@ class Engine:
 
         args = [self._interp(arg) for arg in item.get("args") or []]
         fn = self._resolve_extension(item["func"])
-        self.variables[item["name"]] = invoke_extension(fn, item["func"], args)
+        test = self._stack[-1] if self._stack else None
+        self.variables[item["name"]] = invoke_extension(fn, item["func"], args, test=test)
 
     def _resolve_extension(self, name):
         from snapapi.plugins import ExtensionRegistry

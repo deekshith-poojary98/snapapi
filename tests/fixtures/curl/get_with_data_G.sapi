@@ -1,0 +1,6 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Get Search
+  GET: /search
+  QUERY: q=snap&limit=10

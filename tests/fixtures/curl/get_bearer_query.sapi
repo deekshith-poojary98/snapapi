@@ -1,0 +1,8 @@
+SUITE: Converted Request
+URL: https://api.example.com
+
+TEST: Get Users
+  GET: /users
+  QUERY: page=2
+  AUTH: bearer abc123
+  HEADER Content-Type: application/json
