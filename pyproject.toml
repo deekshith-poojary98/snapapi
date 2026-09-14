@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pysnapapi"
-version = "0.3.0"
+version = "0.4.0"
 description = "Lightweight DSL for HTTP API testing"
 readme = "README.md"
 license = { file = "LICENSE" }
