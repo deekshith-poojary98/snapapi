@@ -1057,12 +1057,25 @@ class Engine:
             body = response.json()
         except ValueError as exc:
             raise AssertionError(f"Response is not JSON: {exc}") from exc
+        operator = check["operator"]
+        op_upper = _norm_operator(operator)
+        if op_upper in ("ABSENT", "EXISTS"):
+            try:
+                actual = jsonpath.extract(body, path)
+                found = True
+            except JsonPathError:
+                actual = None
+                found = False
+            if op_upper == "ABSENT":
+                assert not found, f"JSON {path} should be absent, got {actual!r}"
+            else:
+                assert found, f"JSON {path} should exist"
+            return
         try:
             actual = jsonpath.extract(body, path)
         except JsonPathError as exc:
             raise AssertionError(str(exc)) from exc
         expected = self._interp(check.get("value"))
-        operator = check["operator"]
         if operator.startswith("length "):
             cmp_op = operator.split(" ", 1)[1]
             self._compare(len(actual), cmp_op, expected, f"JSON {path} length")
@@ -1111,6 +1124,13 @@ class Engine:
         name = self._interp(check["name"])
         operator = _norm_operator(check["operator"])
         actual = response.headers.get(name)
+        if operator in ("ABSENT", "EXISTS"):
+            found = actual is not None
+            if operator == "ABSENT":
+                assert not found, f"Header {name} should be absent, got {actual!r}"
+            else:
+                assert found, f"Header {name} should exist"
+            return
         if operator in ("EMPTY", "NOT EMPTY"):
             actual = actual if actual is not None else ""
             _assert_value(actual, operator, None, f"Header {name}")
@@ -1826,6 +1846,9 @@ def _assert_value(actual, operator, expected, label, delta=None):
     elif op == "IN":
         options = _as_list(expected)
         assert actual in options, f"{label} value {actual!r} not in {expected!r}"
+    elif op == "NOT IN":
+        options = _as_list(expected)
+        assert actual not in options, f"{label} value {actual!r} unexpectedly in {expected!r}"
     elif op == "CONTAINS-ALL":
         if not isinstance(actual, (list, tuple, set)):
             raise AssertionError(f"{label} contains-all requires an array, got {actual!r}")
@@ -1843,6 +1866,75 @@ def _assert_value(actual, operator, expected, label, delta=None):
         else:
             found = any(str(item) in str(actual) for item in wanted)
         assert found, f"{label} value {actual!r} does not contain any of {expected!r}"
+    elif op == "CONTAINS-SEQUENCE":
+        if not isinstance(actual, (list, tuple)):
+            raise AssertionError(f"{label} contains-sequence requires an array, got {actual!r}")
+        wanted = _as_list(expected)
+        if not wanted:
+            raise AssertionError(f"{label} contains-sequence requires a non-empty sequence")
+        haystack = list(actual)
+        found = any(haystack[i : i + len(wanted)] == wanted for i in range(0, len(haystack) - len(wanted) + 1))
+        assert found, f"{label} value {actual!r} does not contain sequence {wanted!r}"
+    elif op == "SUBSET-OF":
+        if not isinstance(actual, (list, tuple, set)):
+            raise AssertionError(f"{label} subset-of requires an array, got {actual!r}")
+        universe = _as_list(expected)
+        extra = [item for item in actual if item not in universe]
+        assert not extra, f"{label} value {actual!r} is not a subset of {universe!r} (extra {extra!r})"
+    elif op == "CONTAINS-KEYS":
+        if not isinstance(actual, dict):
+            raise AssertionError(f"{label} contains-keys requires an object, got {actual!r}")
+        wanted = [str(item) for item in _as_list(expected)]
+        missing = [key for key in wanted if key not in actual]
+        assert not missing, f"{label} missing keys {missing!r} in {sorted(actual.keys())!r}"
+    elif op == "NOT CONTAINS-KEYS":
+        if not isinstance(actual, dict):
+            raise AssertionError(f"{label} not contains-keys requires an object, got {actual!r}")
+        unwanted = [str(item) for item in _as_list(expected)]
+        present = [key for key in unwanted if key in actual]
+        assert not present, f"{label} unexpectedly has keys {present!r}"
+    elif op == "SORTED":
+        if not isinstance(actual, (list, tuple)):
+            raise AssertionError(f"{label} sorted requires an array, got {actual!r}")
+        items = list(actual)
+        try:
+            assert items == sorted(items), f"{label} expected ascending sort, got {actual!r}"
+        except TypeError as exc:
+            raise AssertionError(f"{label} cannot sort values {actual!r}") from exc
+    elif op == "SORTED DESC":
+        if not isinstance(actual, (list, tuple)):
+            raise AssertionError(f"{label} sorted desc requires an array, got {actual!r}")
+        items = list(actual)
+        try:
+            assert items == sorted(items, reverse=True), f"{label} expected descending sort, got {actual!r}"
+        except TypeError as exc:
+            raise AssertionError(f"{label} cannot sort values {actual!r}") from exc
+    elif op == "ZERO":
+        try:
+            value = float(actual)
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} zero requires a number, got {actual!r}") from exc
+        assert value == 0, f"{label} expected 0, got {actual!r}"
+    elif op == "POSITIVE":
+        try:
+            value = float(actual)
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} positive requires a number, got {actual!r}") from exc
+        assert value > 0, f"{label} expected > 0, got {actual!r}"
+    elif op == "NEGATIVE":
+        try:
+            value = float(actual)
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} negative requires a number, got {actual!r}") from exc
+        assert value < 0, f"{label} expected < 0, got {actual!r}"
+    elif op == "EQUALS-IGNORING-CASE":
+        assert str(actual).lower() == str(expected).lower(), (
+            f"{label} expected {expected!r} ignoring case, got {actual!r}"
+        )
+    elif op == "CONTAINS-IGNORING-CASE":
+        assert str(expected).lower() in str(actual).lower(), (
+            f"{label} value {actual!r} does not contain {expected!r} ignoring case"
+        )
     elif op == "BETWEEN":
         bounds = _as_list(expected)
         if len(bounds) != 2:

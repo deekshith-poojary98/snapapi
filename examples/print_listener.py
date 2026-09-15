@@ -1,6 +1,6 @@
 """Example SnapAPI listener — print each test as it finishes.
 
-    snapapi examples/connecthr-auth.sapi --env examples/connecthr.env \
+    snapapi examples/hello/hello.sapi \\
       --listener examples/print_listener.py:PrintListener
 """
 

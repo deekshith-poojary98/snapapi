@@ -492,13 +492,18 @@
       check.negated = negated;
     } else if (expectKind === "JSON") {
       var lengthMatch = remainder.match(/^(\S+)\s+length\s+(==|!=|>=|<=|>|<)\s+(.+)$/i);
+      var containsKeysMatch = remainder.match(/^(.+?)\s+(not\s+)?contains-keys\s+(.+)$/i);
+      var containsSequenceMatch = remainder.match(/^(.+?)\s+contains-sequence\s+(.+)$/i);
       var containsSetMatch = remainder.match(/^(.+?)\s+contains(?:-|\s+)(all|only|any)\s+(.+)$/i);
+      var subsetMatch = remainder.match(/^(.+?)\s+subset-of\s+(.+)$/i);
       var notMatchesMatch = remainder.match(/^(.+?)\s+not\s+matches\s+(.+)$/i);
-      var affixMatch = remainder.match(/^(.+?)\s+(starts-with|ends-with)\s+(.+)$/i);
+      var notContainsMatch = remainder.match(/^(.+?)\s+not\s+contains\s+(.+)$/i);
+      var notInMatch = remainder.match(/^(.+?)\s+not\s+in\s+(.+)$/i);
+      var affixMatch = remainder.match(/^(.+?)\s+(starts-with|ends-with|equals-ignoring-case|contains-ignoring-case)\s+(.+)$/i);
       var closeToMatch = remainder.match(/^(.+?)\s+close-to\s+(\S+)\s+(?:delta|±|\+\/-)\s+(\S+)\s*$/i);
       var betweenMatch = remainder.match(/^(.+?)\s+between\s+(\S+)\s+(\S+)\s*$/i);
       var typeMatch = remainder.match(/^(.+?)\s+type\s+(\S+)\s*$/i);
-      var unaryMatch = remainder.match(/^(.+?)\s+(not\s+empty|empty|unique)\s*$/i);
+      var unaryMatch = remainder.match(/^(.+?)\s+(not\s+empty|empty|unique|not\s+exists|absent|exists|present|sorted(?:\s+desc|\s+asc)?|zero|positive|negative)\s*$/i);
       var inMatch = remainder.match(/^(.+?)\s+in\s+(.+)$/i);
       var jsonMatch = remainder.match(/^(\S+)\s+(==|!=|CONTAINS|MATCHES|>=|<=|>|<)\s+(.+)$/i);
       if (lengthMatch) {
@@ -506,16 +511,41 @@
         check.path = lengthMatch[1];
         check.operator = "length " + lengthMatch[2];
         check.value = parseExpectValue(lengthMatch[3].trim());
+      } else if (containsKeysMatch) {
+        check.type = "JSON";
+        check.path = containsKeysMatch[1].trim();
+        check.operator = containsKeysMatch[2] ? "NOT CONTAINS-KEYS" : "CONTAINS-KEYS";
+        check.value = parseExpectValue(containsKeysMatch[3].trim());
+      } else if (containsSequenceMatch) {
+        check.type = "JSON";
+        check.path = containsSequenceMatch[1].trim();
+        check.operator = "CONTAINS-SEQUENCE";
+        check.value = parseExpectValue(containsSequenceMatch[2].trim());
       } else if (containsSetMatch) {
         check.type = "JSON";
         check.path = containsSetMatch[1].trim();
         check.operator = "CONTAINS-" + containsSetMatch[2].toUpperCase();
         check.value = parseExpectValue(containsSetMatch[3].trim());
+      } else if (subsetMatch) {
+        check.type = "JSON";
+        check.path = subsetMatch[1].trim();
+        check.operator = "SUBSET-OF";
+        check.value = parseExpectValue(subsetMatch[2].trim());
       } else if (notMatchesMatch) {
         check.type = "JSON";
         check.path = notMatchesMatch[1].trim();
         check.operator = "NOT MATCHES";
         check.value = parseExpectValue(notMatchesMatch[2].trim());
+      } else if (notContainsMatch) {
+        check.type = "JSON";
+        check.path = notContainsMatch[1].trim();
+        check.operator = "NOT CONTAINS";
+        check.value = parseExpectValue(notContainsMatch[2].trim());
+      } else if (notInMatch) {
+        check.type = "JSON";
+        check.path = notInMatch[1].trim();
+        check.operator = "NOT IN";
+        check.value = parseExpectValue(notInMatch[2].trim());
       } else if (affixMatch) {
         check.type = "JSON";
         check.path = affixMatch[1].trim();
@@ -545,7 +575,11 @@
       } else if (unaryMatch) {
         check.type = "JSON";
         check.path = unaryMatch[1].trim();
-        check.operator = unaryMatch[2].replace(/\s+/g, " ").toUpperCase();
+        var uop = unaryMatch[2].replace(/\s+/g, " ").toUpperCase();
+        if (uop === "ABSENT" || uop === "NOT EXISTS") uop = "ABSENT";
+        else if (uop === "EXISTS" || uop === "PRESENT") uop = "EXISTS";
+        else if (uop === "SORTED ASC") uop = "SORTED";
+        check.operator = uop;
         check.value = null;
       } else if (inMatch) {
         check.type = "JSON";
@@ -562,20 +596,28 @@
         throw new ParseError('EXPECT JSON must look like: JSON $.path == "value"', lineno);
       }
     } else if (expectKind === "HEADER") {
-      var hunary = remainder.match(/^(\S+)\s+(not\s+empty|empty)\s*$/i);
-      var hm = remainder.match(/^(\S+)\s+(==|!=|CONTAINS|NOT\s+MATCHES|MATCHES|STARTS-WITH|ENDS-WITH|IN)\s+(.+)$/i);
+      var hunary = remainder.match(/^(\S+)\s+(not\s+empty|empty|not\s+exists|absent|exists|present)\s*$/i);
+      var hm = remainder.match(/^(\S+)\s+(==|!=|CONTAINS|NOT\s+CONTAINS|NOT\s+MATCHES|MATCHES|STARTS-WITH|ENDS-WITH|IN|NOT\s+IN|EQUALS-IGNORING-CASE|CONTAINS-IGNORING-CASE)\s+(.+)$/i);
       if (hunary) {
         check.type = "HEADER";
         check.name = hunary[1];
-        check.operator = hunary[2].replace(/\s+/g, " ").toUpperCase();
+        var hopU = hunary[2].replace(/\s+/g, " ").toUpperCase();
+        if (hopU === "ABSENT" || hopU === "NOT EXISTS") hopU = "ABSENT";
+        else if (hopU === "EXISTS" || hopU === "PRESENT") hopU = "EXISTS";
+        check.operator = hopU;
         check.value = "";
       } else {
         if (!hm) throw new ParseError("EXPECT HEADER must look like: HEADER Content-Type CONTAINS json", lineno);
         var hop = hm[2].replace(/\s+/g, " ").toUpperCase();
         check.type = "HEADER";
         check.name = hm[1];
-        check.operator = hop === "CONTAINS" || hop === "MATCHES" || hop === "NOT MATCHES" || hop === "STARTS-WITH" || hop === "ENDS-WITH" || hop === "IN" ? hop : hm[2];
-        check.value = hop === "IN" ? parseExpectValue(hm[3].trim()) : stripQuotes(hm[3].trim());
+        var headerOps = {
+          CONTAINS: 1, MATCHES: 1, "NOT CONTAINS": 1, "NOT MATCHES": 1,
+          "STARTS-WITH": 1, "ENDS-WITH": 1, IN: 1, "NOT IN": 1,
+          "EQUALS-IGNORING-CASE": 1, "CONTAINS-IGNORING-CASE": 1
+        };
+        check.operator = headerOps[hop] ? hop : hm[2];
+        check.value = hop === "IN" || hop === "NOT IN" ? parseExpectValue(hm[3].trim()) : stripQuotes(hm[3].trim());
       }
     }
     if (becauseTaken.because) check.because = becauseTaken.because;
@@ -1207,6 +1249,12 @@
     return true;
   }
 
+  function compareValues(a, b) {
+    if (a === b) return 0;
+    if (typeof a === "number" && typeof b === "number") return a - b;
+    return String(a) < String(b) ? -1 : 1;
+  }
+
   function assertValue(actual, operator, expected, label, delta) {
     var op = normOp(operator);
     if (op === "==") {
@@ -1262,6 +1310,9 @@
     } else if (op === "IN") {
       var options = asList(expected);
       if (options.indexOf(actual) === -1) throw new Error(label + " value " + JSON.stringify(actual) + " not in " + JSON.stringify(expected));
+    } else if (op === "NOT IN") {
+      var notOptions = asList(expected);
+      if (notOptions.indexOf(actual) !== -1) throw new Error(label + " value " + JSON.stringify(actual) + " unexpectedly in " + JSON.stringify(expected));
     } else if (op === "CONTAINS-ALL") {
       if (!Array.isArray(actual)) throw new Error(label + " contains-all requires an array, got " + JSON.stringify(actual));
       var missing = asList(expected).filter(function (item) { return actual.indexOf(item) === -1; });
@@ -1275,6 +1326,56 @@
         ? wanted.some(function (item) { return actual.indexOf(item) !== -1; })
         : wanted.some(function (item) { return String(actual).indexOf(String(item)) !== -1; });
       if (!found) throw new Error(label + " value " + JSON.stringify(actual) + " does not contain any of " + JSON.stringify(expected));
+    } else if (op === "CONTAINS-SEQUENCE") {
+      if (!Array.isArray(actual)) throw new Error(label + " contains-sequence requires an array, got " + JSON.stringify(actual));
+      var seq = asList(expected);
+      if (!seq.length) throw new Error(label + " contains-sequence requires a non-empty sequence");
+      var seqFound = false;
+      for (var si = 0; si <= actual.length - seq.length; si++) {
+        var ok = true;
+        for (var sj = 0; sj < seq.length; sj++) {
+          if (actual[si + sj] !== seq[sj]) { ok = false; break; }
+        }
+        if (ok) { seqFound = true; break; }
+      }
+      if (!seqFound) throw new Error(label + " value " + JSON.stringify(actual) + " does not contain sequence " + JSON.stringify(seq));
+    } else if (op === "SUBSET-OF") {
+      if (!Array.isArray(actual)) throw new Error(label + " subset-of requires an array, got " + JSON.stringify(actual));
+      var universe = asList(expected);
+      var extra = actual.filter(function (item) { return universe.indexOf(item) === -1; });
+      if (extra.length) throw new Error(label + " value " + JSON.stringify(actual) + " is not a subset of " + JSON.stringify(universe) + " (extra " + JSON.stringify(extra) + ")");
+    } else if (op === "CONTAINS-KEYS") {
+      if (!actual || typeof actual !== "object" || Array.isArray(actual)) throw new Error(label + " contains-keys requires an object, got " + JSON.stringify(actual));
+      var keyWanted = asList(expected).map(String);
+      var keyMissing = keyWanted.filter(function (k) { return !(k in actual); });
+      if (keyMissing.length) throw new Error(label + " missing keys " + JSON.stringify(keyMissing));
+    } else if (op === "NOT CONTAINS-KEYS") {
+      if (!actual || typeof actual !== "object" || Array.isArray(actual)) throw new Error(label + " not contains-keys requires an object, got " + JSON.stringify(actual));
+      var keyUnwanted = asList(expected).map(String);
+      var keyPresent = keyUnwanted.filter(function (k) { return k in actual; });
+      if (keyPresent.length) throw new Error(label + " unexpectedly has keys " + JSON.stringify(keyPresent));
+    } else if (op === "SORTED") {
+      if (!Array.isArray(actual)) throw new Error(label + " sorted requires an array, got " + JSON.stringify(actual));
+      var asc = actual.slice().sort(compareValues);
+      if (JSON.stringify(actual) !== JSON.stringify(asc)) throw new Error(label + " expected ascending sort, got " + JSON.stringify(actual));
+    } else if (op === "SORTED DESC") {
+      if (!Array.isArray(actual)) throw new Error(label + " sorted desc requires an array, got " + JSON.stringify(actual));
+      var desc = actual.slice().sort(compareValues).reverse();
+      if (JSON.stringify(actual) !== JSON.stringify(desc)) throw new Error(label + " expected descending sort, got " + JSON.stringify(actual));
+    } else if (op === "ZERO") {
+      if (Number(actual) !== 0) throw new Error(label + " expected 0, got " + JSON.stringify(actual));
+    } else if (op === "POSITIVE") {
+      if (!(Number(actual) > 0)) throw new Error(label + " expected > 0, got " + JSON.stringify(actual));
+    } else if (op === "NEGATIVE") {
+      if (!(Number(actual) < 0)) throw new Error(label + " expected < 0, got " + JSON.stringify(actual));
+    } else if (op === "EQUALS-IGNORING-CASE") {
+      if (String(actual).toLowerCase() !== String(expected).toLowerCase()) {
+        throw new Error(label + " expected " + JSON.stringify(expected) + " ignoring case, got " + JSON.stringify(actual));
+      }
+    } else if (op === "CONTAINS-IGNORING-CASE") {
+      if (String(actual).toLowerCase().indexOf(String(expected).toLowerCase()) === -1) {
+        throw new Error(label + " value " + JSON.stringify(actual) + " does not contain " + JSON.stringify(expected) + " ignoring case");
+      }
     } else if (op === "BETWEEN") {
       var bounds = asList(expected);
       if (bounds.length !== 2) throw new Error(label + " between requires two numbers, got " + JSON.stringify(expected));
@@ -1353,6 +1454,24 @@
     } else if (check.type === "JSON") {
       if (response.json == null) throw new Error("Response is not JSON");
       var jpath = interpolate(check.path, variables);
+      var jop = normOp(check.operator);
+      if (jop === "ABSENT" || jop === "EXISTS") {
+        var found = true;
+        var gotAbsent = null;
+        try {
+          gotAbsent = extract(response.json, jpath);
+          // JS property access returns undefined for missing keys (Python raises).
+          found = typeof gotAbsent !== "undefined";
+        } catch (pathErr) {
+          found = false;
+        }
+        if (jop === "ABSENT") {
+          if (found) throw new Error("JSON " + jpath + " should be absent, got " + JSON.stringify(gotAbsent));
+        } else if (!found) {
+          throw new Error("JSON " + jpath + " should exist");
+        }
+        return;
+      }
       var got = extract(response.json, jpath);
       var want = check.value != null ? interpolate(check.value, variables) : null;
       var op = check.operator;
@@ -1367,6 +1486,15 @@
       var hname = interpolate(check.name, variables);
       var hop = normOp(check.operator);
       var hactual = headerGet(response.headers, hname);
+      if (hop === "ABSENT" || hop === "EXISTS") {
+        var hfound = hactual != null;
+        if (hop === "ABSENT") {
+          if (hfound) throw new Error("Header " + hname + " should be absent, got " + JSON.stringify(hactual));
+        } else if (!hfound) {
+          throw new Error("Header " + hname + " should exist");
+        }
+        return;
+      }
       if (hop === "EMPTY" || hop === "NOT EMPTY") {
         assertValue(hactual == null ? "" : hactual, hop, null, "Header " + hname);
         return;

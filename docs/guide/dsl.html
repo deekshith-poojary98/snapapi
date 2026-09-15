@@ -160,46 +160,91 @@ Bob,bob@example.com
       <p><code>BODY</code> and <code>DATA</code> are aliases. JSON may be one line or span following lines until the value is complete. <code>FILE</code> and <code>GRAPHQL</code> are CLI-only; the playground reports them as unsupported.</p>
 
       <h2 id="expect">Expect</h2>
-      <p>Check kinds are case-insensitive. Preferred forms:</p>
+      <p>Check kinds are case-insensitive. Preferred forms use lowercase kinds (<code>json</code>, <code>header</code>, <code>body</code>, <code>status</code>).</p>
       <pre><code class="language-snaptest">EXPECT: status == 200
-EXPECT: status != 500
-EXPECT: status == 200 RETRY 5 ON 5xx BACKOFF 1s
-EXPECT: body contains userId
-EXPECT: body not contains stack
-EXPECT: json $.email == "jane@example.com"
-EXPECT: json $.email matches ^.+@example\\.com$
-EXPECT: json $.email not matches @tempmail
-EXPECT: json $.items length == 3
-EXPECT: json $.items empty
-EXPECT: json $.items not empty
-EXPECT: json $.id type string
-EXPECT: json $.status in ["open","pending"]
-EXPECT: json $.email starts-with "ada@"
-EXPECT: json $.email ends-with "@example.com"
-EXPECT: json $.tags contains-all ["a","b"]
-EXPECT: json $.tags contains-only ["a","b"]
-EXPECT: json $.tags contains-any ["admin","owner"]
-EXPECT: json $.ids unique
-EXPECT: json $.count between 1 10
-EXPECT: json $.score close-to 0.33 delta 0.01
-EXPECT: json $.items[*].id contains 3
-EXPECT: json $.items[?(@.status=="open")].id contains 3
-EXPECT: json $.items each $.status == "active"
 EXPECT: json $.ok == true BECAUSE "login should succeed"
 EXPECT: status == 400 OR status == 401
-EXPECT: json $.success == false AND body contains error
 EXPECT: (status == 400 OR status == 401) AND json $.success == false
-EXPECT: header Content-Type contains json
-EXPECT: header Content-Type starts-with application
-EXPECT: body empty
-EXPECT: schema ./schemas/user.json
-EXPECT: duration &lt; 200ms
-EXPECT: openapi ./openapi.yaml
-EXPECT: openapi ./openapi.yaml strict
-EXPECT: xpath //Order/@id == "1"</code></pre>
-      <p><code>AND</code> / <code>OR</code> combine checks on one line. <code>AND</code> binds tighter than <code>OR</code>; use parentheses to group. Quote a value if it contains the words <code>AND</code> or <code>OR</code>. Multiple <code>EXPECT</code> lines on the same request all run; if more than one fails, every failure is reported together. <code>BECAUSE "reason"</code> is prepended to that check's failure message.</p>
-      <p>JSONPath is a small subset: <code>$.a.b</code>, <code>$.items.0.id</code>, <code>$.items[0].id</code>, <code>$.items[*].id</code>, and equality filters <code>$.items[?(@.status=="open")]</code>. XPath uses stdlib <code>xml.etree</code> (descendant tags and <code>/@attr</code>); axes, namespaces, and functions are not implemented.</p>
-      <p>The playground runs status, body, json, and header checks, including the operators above. Schema, XPath, duration, and OpenAPI expects print a playground error instead of failing silently.</p>
+EXPECT: status == 200 RETRY 5 ON 5xx BACKOFF 1s</code></pre>
+      <p><code>AND</code> / <code>OR</code> combine checks on one line (<code>AND</code> binds tighter). Multiple <code>EXPECT</code> lines all run; failures are reported together. <code>BECAUSE "reason"</code> prefixes that check’s failure message.</p>
+
+      <h3>Status</h3>
+      <table>
+        <thead><tr><th>Form</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>status == 200</code> / <code>!= 500</code></td><td>HTTP status equals / not equals</td></tr>
+          <tr><td><code>status == 200 RETRY N …</code></td><td>Retry when status is retryable (see WAIT)</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Body</h3>
+      <table>
+        <thead><tr><th>Form</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>body contains text</code> / <code>not contains</code></td><td>Substring present / absent</td></tr>
+          <tr><td><code>body matches regex</code> / <code>not matches</code></td><td>Regex search</td></tr>
+          <tr><td><code>body starts-with</code> / <code>ends-with</code></td><td>Prefix / suffix</td></tr>
+          <tr><td><code>body empty</code> / <code>not empty</code></td><td>Empty or non-empty response text</td></tr>
+        </tbody>
+      </table>
+
+      <h3>JSON</h3>
+      <p>JSONPath subset: <code>$.a.b</code>, <code>$.items[0].id</code>, <code>$.items[*].id</code>, <code>$.items[?(@.status=="open")]</code>.</p>
+      <table>
+        <thead><tr><th>Form</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>json $.x == v</code> / <code>!=</code> / <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td><td>Compare value</td></tr>
+          <tr><td><code>json $.x contains v</code> / <code>not contains</code></td><td>Array membership or string substring</td></tr>
+          <tr><td><code>json $.x matches</code> / <code>not matches</code></td><td>Regex on string value</td></tr>
+          <tr><td><code>json $.x starts-with</code> / <code>ends-with</code></td><td>String prefix / suffix</td></tr>
+          <tr><td><code>json $.x equals-ignoring-case</code></td><td>Case-insensitive equality</td></tr>
+          <tr><td><code>json $.x contains-ignoring-case</code></td><td>Case-insensitive substring</td></tr>
+          <tr><td><code>json $.x in […]</code> / <code>not in […]</code></td><td>Value in / not in a list</td></tr>
+          <tr><td><code>json $.x length == N</code> (also <code>!=</code> <code>&gt;</code> …)</td><td>Length of array/string/object</td></tr>
+          <tr><td><code>json $.x empty</code> / <code>not empty</code></td><td>Empty container or string</td></tr>
+          <tr><td><code>json $.x absent</code> / <code>not exists</code></td><td>Path missing (<code>null</code> still counts as present)</td></tr>
+          <tr><td><code>json $.x exists</code> / <code>present</code></td><td>Path resolves</td></tr>
+          <tr><td><code>json $.x type string|number|array|object|boolean|null</code></td><td>JSON type</td></tr>
+          <tr><td><code>json $.arr contains-all|contains-only|contains-any […]</code></td><td>Set-style array checks</td></tr>
+          <tr><td><code>json $.arr contains-sequence […]</code></td><td>Ordered contiguous sublist</td></tr>
+          <tr><td><code>json $.arr subset-of […]</code></td><td>Every element is in the given list</td></tr>
+          <tr><td><code>json $.obj contains-keys […]</code> / <code>not contains-keys</code></td><td>Object keys present / absent</td></tr>
+          <tr><td><code>json $.arr unique</code></td><td>No duplicate values</td></tr>
+          <tr><td><code>json $.arr sorted</code> / <code>sorted desc</code></td><td>Ascending / descending order</td></tr>
+          <tr><td><code>json $.n between LO HI</code></td><td>Inclusive numeric range</td></tr>
+          <tr><td><code>json $.n close-to X delta D</code></td><td>Absolute tolerance (<code>±</code> also accepted)</td></tr>
+          <tr><td><code>json $.n zero</code> / <code>positive</code> / <code>negative</code></td><td>Numeric sign checks</td></tr>
+          <tr><td><code>json $.items each $.status == "active"</code></td><td>Assert each array element</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Headers</h3>
+      <table>
+        <thead><tr><th>Form</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>header Name == v</code> / <code>!=</code></td><td>Exact value</td></tr>
+          <tr><td><code>header Name contains</code> / <code>not contains</code></td><td>Substring</td></tr>
+          <tr><td><code>header Name matches</code> / <code>not matches</code></td><td>Regex</td></tr>
+          <tr><td><code>header Name starts-with</code> / <code>ends-with</code></td><td>Prefix / suffix</td></tr>
+          <tr><td><code>header Name equals-ignoring-case</code> / <code>contains-ignoring-case</code></td><td>Case-insensitive</td></tr>
+          <tr><td><code>header Name in […]</code> / <code>not in […]</code></td><td>Value in / not in list</td></tr>
+          <tr><td><code>header Name empty</code> / <code>not empty</code></td><td>Empty string (missing treated as empty for empty/not empty)</td></tr>
+          <tr><td><code>header Name absent</code> / <code>not exists</code></td><td>Header missing</td></tr>
+          <tr><td><code>header Name exists</code> / <code>present</code></td><td>Header present</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Other checks</h3>
+      <table>
+        <thead><tr><th>Form</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>schema ./file.json</code> / <code>schema inline {…}</code></td><td>JSON Schema validation</td></tr>
+          <tr><td><code>duration &lt; 200ms</code></td><td>Request duration</td></tr>
+          <tr><td><code>openapi ./spec.yaml</code> [<code>strict</code>]</td><td>OpenAPI contract check</td></tr>
+          <tr><td><code>xpath //Order/@id == "1"</code></td><td>XML path (stdlib; limited)</td></tr>
+        </tbody>
+      </table>
+      <p>The playground runs status, body, json, and header checks. Schema, XPath, duration, and OpenAPI print a playground error instead of failing silently.</p>
 
       <h2 id="save">SAVE, SET, and variables</h2>
       <pre><code class="language-snaptest">SAVE: userId FROM $.id

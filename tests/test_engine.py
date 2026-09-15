@@ -924,9 +924,117 @@ TEST: Ops
   EXPECT: json $.count between 1 10
   EXPECT: json $.score close-to 0.33 delta 0.01
   EXPECT: json $.email not matches @tempmail
+  EXPECT: json $.password absent
+  EXPECT: json $.id exists
+  EXPECT: json $.missing exists
+  EXPECT: json $.nope not exists
   EXPECT: header Content-Type starts-with application
   EXPECT: header X-Status in ["open","pending"]
+  EXPECT: header X-Debug absent
+  EXPECT: header Content-Type exists
+  EXPECT: header Content-Type not contains xml
   EXPECT: body not empty
+"""))
+    assert result.ok
+
+
+def test_expect_collection_and_key_operators(http_server):
+    http_server.on(
+        "GET",
+        "/payload",
+        json={
+            "status": "open",
+            "events": ["created", "paid", "shipped"],
+            "roles": ["editor", "viewer"],
+            "ids": [1, 2, 3],
+            "desc_ids": [3, 2, 1],
+            "user": {"id": 1, "email": "Ada@Example.com", "name": "Ada"},
+            "count": 5,
+            "balance": 0,
+            "debt": -2,
+            "tags": ["a", "b"],
+        },
+        headers={"Content-Type": "Application/JSON", "X-Env": "Stage"},
+    )
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Collections
+  GET: /payload
+  EXPECT: json $.status not in ["error","failed"]
+  EXPECT: json $.events contains-sequence ["created","paid"]
+  EXPECT: json $.roles subset-of ["admin","editor","viewer"]
+  EXPECT: json $.ids sorted
+  EXPECT: json $.desc_ids sorted desc
+  EXPECT: json $.user contains-keys ["id","email"]
+  EXPECT: json $.user not contains-keys ["password","ssn"]
+  EXPECT: json $.tags not contains "z"
+  EXPECT: json $.user.email equals-ignoring-case "ada@example.com"
+  EXPECT: json $.count positive
+  EXPECT: json $.balance zero
+  EXPECT: json $.debt negative
+  EXPECT: header Content-Type contains-ignoring-case json
+  EXPECT: header X-Env equals-ignoring-case stage
+"""))
+    assert result.ok
+
+
+def test_expect_collection_operators_fail(http_server):
+    http_server.on(
+        "GET",
+        "/payload",
+        json={
+            "status": "error",
+            "events": ["created", "shipped"],
+            "roles": ["root"],
+            "ids": [3, 1, 2],
+            "user": {"id": 1, "password": "x"},
+        },
+    )
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Failures
+  GET: /payload
+  EXPECT: json $.status not in ["error"]
+  EXPECT: json $.events contains-sequence ["created","paid"]
+  EXPECT: json $.roles subset-of ["admin","editor"]
+  EXPECT: json $.ids sorted
+  EXPECT: json $.user contains-keys ["email"]
+  EXPECT: json $.user not contains-keys ["password"]
+"""))
+    assert not result.ok
+    error = result.tests[0].error or ""
+    assert "unexpectedly in" in error
+    assert "does not contain sequence" in error
+    assert "not a subset" in error
+    assert "expected ascending sort" in error
+    assert "missing keys" in error
+    assert "unexpectedly has keys" in error
+    http_server.on("GET", "/user", json={"password": "secret"})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Leak
+  GET: /user
+  EXPECT: json $.password absent
+"""))
+    assert not result.ok
+    assert "should be absent" in (result.tests[0].error or "")
+
+
+def test_expect_exists_fails_when_path_missing(http_server):
+    http_server.on("GET", "/user", json={"id": 1})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Missing
+  GET: /user
+  EXPECT: json $.email exists
+"""))
+    assert not result.ok
+    assert "should exist" in (result.tests[0].error or "")
+
+
+def test_expect_header_absent(http_server):
+    http_server.on("GET", "/ok", json={"ok": True}, headers={"Content-Type": "application/json"})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Headers
+  GET: /ok
+  EXPECT: header X-Debug absent
+  EXPECT: header Content-Type present
 """))
     assert result.ok
 

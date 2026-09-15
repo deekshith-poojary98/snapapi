@@ -79,12 +79,32 @@ JSON_CONTAINS_SET_RE = re.compile(
     r"^(.+?)\s+contains(?:-|\s+)(all|only|any)\s+(.+)$",
     re.DOTALL | re.IGNORECASE,
 )
+JSON_CONTAINS_SEQUENCE_RE = re.compile(
+    r"^(.+?)\s+contains-sequence\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_CONTAINS_KEYS_RE = re.compile(
+    r"^(.+?)\s+(not\s+)?contains-keys\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_SUBSET_OF_RE = re.compile(
+    r"^(.+?)\s+subset-of\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
 JSON_NOT_MATCHES_RE = re.compile(
     r"^(.+?)\s+not\s+matches\s+(.+)$",
     re.DOTALL | re.IGNORECASE,
 )
+JSON_NOT_CONTAINS_RE = re.compile(
+    r"^(.+?)\s+not\s+contains\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
+JSON_NOT_IN_RE = re.compile(
+    r"^(.+?)\s+not\s+in\s+(.+)$",
+    re.DOTALL | re.IGNORECASE,
+)
 JSON_AFFIX_RE = re.compile(
-    r"^(.+?)\s+(starts-with|ends-with)\s+(.+)$",
+    r"^(.+?)\s+(starts-with|ends-with|equals-ignoring-case|contains-ignoring-case)\s+(.+)$",
     re.DOTALL | re.IGNORECASE,
 )
 JSON_CLOSE_TO_RE = re.compile(
@@ -100,7 +120,7 @@ JSON_TYPE_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 JSON_UNARY_RE = re.compile(
-    r"^(.+?)\s+(not\s+empty|empty|unique)\s*$",
+    r"^(.+?)\s+(not\s+empty|empty|unique|not\s+exists|absent|exists|present|sorted(?:\s+desc|\s+asc)?|zero|positive|negative)\s*$",
     re.DOTALL | re.IGNORECASE,
 )
 JSON_IN_RE = re.compile(
@@ -117,11 +137,11 @@ XPATH_EXPECT_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 HEADER_UNARY_RE = re.compile(
-    r"^(\S+)\s+(not\s+empty|empty)\s*$",
+    r"^(\S+)\s+(not\s+empty|empty|not\s+exists|absent|exists|present)\s*$",
     re.IGNORECASE,
 )
 HEADER_EXPECT_RE = re.compile(
-    r"^(\S+)\s+(==|!=|CONTAINS|NOT\s+MATCHES|MATCHES|STARTS-WITH|ENDS-WITH|IN)\s+(.+)$",
+    r"^(\S+)\s+(==|!=|CONTAINS|NOT\s+CONTAINS|NOT\s+MATCHES|MATCHES|STARTS-WITH|ENDS-WITH|IN|NOT\s+IN|EQUALS-IGNORING-CASE|CONTAINS-IGNORING-CASE)\s+(.+)$",
     re.DOTALL | re.IGNORECASE,
 )
 STATUS_VALUE_RE = re.compile(r"^(==|!=)?\s*(.+)$", re.DOTALL)
@@ -938,8 +958,13 @@ class TestParser:
         elif kind == "JSON":
             length_match = JSON_LENGTH_RE.match(remainder)
             each_match = JSON_EACH_RE.match(remainder)
+            contains_keys_match = JSON_CONTAINS_KEYS_RE.match(remainder)
+            contains_sequence_match = JSON_CONTAINS_SEQUENCE_RE.match(remainder)
             contains_set_match = JSON_CONTAINS_SET_RE.match(remainder)
+            subset_match = JSON_SUBSET_OF_RE.match(remainder)
             not_matches_match = JSON_NOT_MATCHES_RE.match(remainder)
+            not_contains_match = JSON_NOT_CONTAINS_RE.match(remainder)
+            not_in_match = JSON_NOT_IN_RE.match(remainder)
             affix_match = JSON_AFFIX_RE.match(remainder)
             close_to_match = JSON_CLOSE_TO_RE.match(remainder)
             between_match = JSON_BETWEEN_RE.match(remainder)
@@ -963,6 +988,21 @@ class TestParser:
                     "each_operator": operator.upper() if operator.upper() in ("CONTAINS", "MATCHES") else operator,
                     "value": _parse_expect_value(each_match.group(4).strip()),
                 })
+            elif contains_keys_match:
+                negated = bool(contains_keys_match.group(2))
+                check.update({
+                    "type": "JSON",
+                    "path": contains_keys_match.group(1).strip(),
+                    "operator": "NOT CONTAINS-KEYS" if negated else "CONTAINS-KEYS",
+                    "value": _parse_expect_value(contains_keys_match.group(3).strip()),
+                })
+            elif contains_sequence_match:
+                check.update({
+                    "type": "JSON",
+                    "path": contains_sequence_match.group(1).strip(),
+                    "operator": "CONTAINS-SEQUENCE",
+                    "value": _parse_expect_value(contains_sequence_match.group(2).strip()),
+                })
             elif contains_set_match:
                 check.update({
                     "type": "JSON",
@@ -970,12 +1010,33 @@ class TestParser:
                     "operator": "CONTAINS-" + contains_set_match.group(2).upper(),
                     "value": _parse_expect_value(contains_set_match.group(3).strip()),
                 })
+            elif subset_match:
+                check.update({
+                    "type": "JSON",
+                    "path": subset_match.group(1).strip(),
+                    "operator": "SUBSET-OF",
+                    "value": _parse_expect_value(subset_match.group(2).strip()),
+                })
             elif not_matches_match:
                 check.update({
                     "type": "JSON",
                     "path": not_matches_match.group(1).strip(),
                     "operator": "NOT MATCHES",
                     "value": _parse_expect_value(not_matches_match.group(2).strip()),
+                })
+            elif not_contains_match:
+                check.update({
+                    "type": "JSON",
+                    "path": not_contains_match.group(1).strip(),
+                    "operator": "NOT CONTAINS",
+                    "value": _parse_expect_value(not_contains_match.group(2).strip()),
+                })
+            elif not_in_match:
+                check.update({
+                    "type": "JSON",
+                    "path": not_in_match.group(1).strip(),
+                    "operator": "NOT IN",
+                    "value": _parse_expect_value(not_in_match.group(2).strip()),
                 })
             elif affix_match:
                 check.update({
@@ -1018,6 +1079,12 @@ class TestParser:
                 })
             elif unary_match:
                 operator = re.sub(r"\s+", " ", unary_match.group(2).strip().upper())
+                if operator in ("ABSENT", "NOT EXISTS"):
+                    operator = "ABSENT"
+                elif operator in ("EXISTS", "PRESENT"):
+                    operator = "EXISTS"
+                elif operator == "SORTED ASC":
+                    operator = "SORTED"
                 check.update({
                     "type": "JSON",
                     "path": unary_match.group(1).strip(),
@@ -1051,6 +1118,10 @@ class TestParser:
             match = HEADER_EXPECT_RE.match(remainder)
             if unary:
                 operator = re.sub(r"\s+", " ", unary.group(2).strip().upper())
+                if operator in ("ABSENT", "NOT EXISTS"):
+                    operator = "ABSENT"
+                elif operator in ("EXISTS", "PRESENT"):
+                    operator = "EXISTS"
                 check.update({
                     "type": "HEADER",
                     "name": unary.group(1),
@@ -1060,12 +1131,27 @@ class TestParser:
             elif match:
                 operator = match.group(2)
                 op_upper = re.sub(r"\s+", " ", operator.strip().upper())
-                if op_upper in ("CONTAINS", "MATCHES", "NOT MATCHES", "STARTS-WITH", "ENDS-WITH", "IN"):
+                if op_upper in (
+                    "CONTAINS",
+                    "MATCHES",
+                    "NOT CONTAINS",
+                    "NOT MATCHES",
+                    "STARTS-WITH",
+                    "ENDS-WITH",
+                    "IN",
+                    "NOT IN",
+                    "EQUALS-IGNORING-CASE",
+                    "CONTAINS-IGNORING-CASE",
+                ):
                     stored_op = op_upper
                 else:
                     stored_op = operator
                 value_raw = match.group(3).strip()
-                value = _parse_expect_value(value_raw) if stored_op == "IN" else _strip_quotes(value_raw)
+                value = (
+                    _parse_expect_value(value_raw)
+                    if stored_op in ("IN", "NOT IN")
+                    else _strip_quotes(value_raw)
+                )
                 check.update({
                     "type": "HEADER",
                     "name": match.group(1),
