@@ -1,5 +1,9 @@
+import io
+from types import SimpleNamespace
+
 import pytest
 
+from snapapi.engine import Engine
 from snapapi.exceptions import SnapAPIError
 from tests.helpers import parse_dsl, run_dsl
 
@@ -1097,3 +1101,71 @@ TEST: Hello
   EXPECT: body not matches stack
 """))
     assert result.ok
+
+
+def test_wait_attempt_cap_fails_test_not_runner(monkeypatch):
+    suite = parse_dsl("""
+SUITE: Local
+URL: http://example.test
+TEST: Poll
+  GET: /job
+  WAIT: json $.status == "ready" TIMEOUT 3600s BACKOFF 0s
+""")
+    stream = io.StringIO()
+    engine = Engine(suite, stream=stream, retry_backoff=0)
+    pending = SimpleNamespace(
+        status_code=200,
+        url="http://example.test/job",
+        headers={"Content-Type": "application/json"},
+        text='{"status": "pending"}',
+        json=lambda: {"status": "pending"},
+    )
+    monkeypatch.setattr(engine, "_dispatch", lambda *args, **kwargs: pending)
+    monkeypatch.setattr("snapapi.engine.time.sleep", lambda _seconds: None)
+    result = engine.run()
+    assert result.ok is False
+    assert result.failed == 1
+    assert result.tests[0].status == "failed"
+    assert result.tests[0].error
+
+
+def test_invalid_matches_regex_fails_test_not_runner(http_server):
+    http_server.on("GET", "/user", json={"email": "ada@example.com"})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Regex
+  GET: /user
+  EXPECT: json $.email matches [
+"""))
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = (result.tests[0].error or "").lower()
+    assert "regex" in error or "pattern" in error
+
+
+def test_json_length_on_null_fails_test_not_runner(http_server):
+    http_server.on("GET", "/user", json={"email": None})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Null length
+  GET: /user
+  EXPECT: json $.email length == 0
+"""))
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = (result.tests[0].error or "").lower()
+    assert "length" in error
+    assert "null" in error
+
+
+def test_json_length_on_number_fails_test_not_runner(http_server):
+    http_server.on("GET", "/user", json={"id": 1})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Number length
+  GET: /user
+  EXPECT: json $.id length == 1
+"""))
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = (result.tests[0].error or "").lower()
+    assert "length" in error
+    assert "number" in error or "int" in error
+

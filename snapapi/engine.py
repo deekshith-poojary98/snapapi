@@ -35,6 +35,7 @@ init(autoreset=True)
 
 RETRY_BACKOFF_SECONDS = 0.05
 REQUEST_COL_WIDTH = 32
+WAIT_MAX_ATTEMPTS = 10000
 
 
 def format_duration(ms):
@@ -784,7 +785,7 @@ class Engine:
         oauth = step.get("oauth2") or test.get("oauth2") or self.suite.get("oauth2")
         wait_deadline = time.time() + wait["timeout"] if wait else None
         if wait:
-            attempts = max(attempts, 10000)
+            attempts = max(attempts, WAIT_MAX_ATTEMPTS)
 
         try:
             for attempt in range(1, attempts + 1):
@@ -898,6 +899,15 @@ class Engine:
                         self._print_dump(recorded)
                     self._emit_on_fail(test, recorded)
                 return False, last_error, recorded
+            error = last_error
+            if error is None and wait:
+                error = f"WAIT timed out after {WAIT_MAX_ATTEMPTS} attempts"
+            if error:
+                self._print_error(error)
+                if self.dump_on_fail and recorded:
+                    self._print_dump(recorded)
+                self._emit_on_fail(test, recorded)
+            return False, error, recorded
         finally:
             for handle in handles:
                 handle.close()
@@ -989,6 +999,12 @@ class Engine:
             if reason:
                 raise AssertionError(f"{reason}: {exc}") from None
             raise
+        except (TypeError, re.error) as exc:
+            message = _format_check_eval_error(exc)
+            reason = check.get("because")
+            if reason:
+                raise AssertionError(f"{reason}: {message}") from None
+            raise AssertionError(message) from exc
 
     def _run_check(self, check, response, duration_ms=0, method=None, url=None):
         check_type = check["type"]
@@ -1078,6 +1094,8 @@ class Engine:
         expected = self._interp(check.get("value"))
         if operator.startswith("length "):
             cmp_op = operator.split(" ", 1)[1]
+            if not isinstance(actual, (str, bytes, list, tuple, dict, set)):
+                raise AssertionError(f"JSON {path} cannot take length of {_json_type_name(actual)}")
             self._compare(len(actual), cmp_op, expected, f"JSON {path} length")
             return
         if operator.upper() == "EACH":
@@ -1801,6 +1819,20 @@ def _same_set(left, right):
     return all(item in right_items for item in left_items) and all(item in left_items for item in right_items)
 
 
+def _format_check_eval_error(exc):
+    if isinstance(exc, re.error):
+        return f"Invalid regex pattern: {exc}"
+    return f"Check evaluation failed: {exc}"
+
+
+def _regex_search(pattern, text, label):
+    try:
+        compiled = re.compile(str(pattern))
+    except re.error as exc:
+        raise AssertionError(f"{label} invalid regex pattern {pattern!r}: {exc}") from exc
+    return compiled.search(str(text))
+
+
 def _assert_value(actual, operator, expected, label, delta=None):
     op = _norm_operator(operator)
     if op == "==":
@@ -1818,9 +1850,11 @@ def _assert_value(actual, operator, expected, label, delta=None):
         else:
             assert str(expected) not in str(actual), f"{label} value {actual!r} unexpectedly contains {expected!r}"
     elif op == "MATCHES":
-        assert re.search(str(expected), str(actual)), f"{label} value {actual!r} does not match {expected!r}"
+        matched = _regex_search(expected, actual, label)
+        assert matched, f"{label} value {actual!r} does not match {expected!r}"
     elif op == "NOT MATCHES":
-        assert not re.search(str(expected), str(actual)), f"{label} value {actual!r} unexpectedly matches {expected!r}"
+        matched = _regex_search(expected, actual, label)
+        assert not matched, f"{label} value {actual!r} unexpectedly matches {expected!r}"
     elif op == "STARTS-WITH":
         assert str(actual).startswith(str(expected)), f"{label} value {actual!r} does not start with {expected!r}"
     elif op == "ENDS-WITH":
