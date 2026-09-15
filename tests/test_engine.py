@@ -16,6 +16,18 @@ URL: {server.base_url}
 """
 
 
+def _assert_each_upload_contains(http_server, *payloads):
+    assert http_server.requests, "expected uploaded requests"
+    for index, request in enumerate(http_server.requests, start=1):
+        raw = request.get("raw") or b""
+        body = request.get("body") or ""
+        assert raw, f"attempt {index} sent an empty body"
+        for payload in payloads:
+            assert payload in raw, (
+                f"attempt {index} did not upload complete file bytes {payload!r}; raw={raw!r} body={body!r}"
+            )
+
+
 def test_get_status_pass(http_server):
     http_server.on("GET", "/api/users", json={"data": [{"id": 1}]})
     result, _, _ = run_dsl(_suite(http_server, """
@@ -626,6 +638,74 @@ TEST: Flaky
 """))
     assert not result.ok
     assert len(http_server.requests) == 3
+
+
+def test_retry_file_upload_sends_complete_body_each_attempt(http_server, tmp_path):
+    payload = b"BUG003-PHOTO-PAYLOAD-COMPLETE"
+    photo = tmp_path / "photo.bin"
+    photo.write_bytes(payload)
+    http_server.on("POST", "/upload", json={"ok": True}, fail_times=1)
+    result, _, _ = run_dsl(_suite(http_server, f"""
+TEST: Upload
+  POST: /upload
+  FILE: avatar FROM {photo}
+  EXPECT: status == 200 RETRY 3 ON 5xx BACKOFF 0s
+"""))
+    assert result.ok
+    assert len(http_server.requests) == 2
+    _assert_each_upload_contains(http_server, payload)
+    assert "multipart" in http_server.requests[0]["headers"].get("Content-Type", "")
+    assert "multipart" in http_server.requests[1]["headers"].get("Content-Type", "")
+
+
+def test_wait_file_upload_sends_complete_body_each_attempt(http_server, tmp_path):
+    payload = b"BUG003-WAIT-PHOTO-PAYLOAD-COMPLETE"
+    photo = tmp_path / "photo.bin"
+    photo.write_bytes(payload)
+    state = {"n": 0}
+
+    def handler(record):
+        state["n"] += 1
+        if state["n"] < 2:
+            return 200, {"Content-Type": "application/json"}, {"status": "pending"}
+        return 200, {"Content-Type": "application/json"}, {"status": "ready"}
+
+    http_server.on("POST", "/upload", handler=handler)
+    result, _, _ = run_dsl(_suite(http_server, f"""
+TEST: Poll upload
+  POST: /upload
+  FILE: avatar FROM {photo}
+  WAIT: json $.status == "ready" TIMEOUT 2s BACKOFF 0s
+  EXPECT: status == 200
+"""))
+    assert result.ok
+    assert state["n"] == 2
+    assert len(http_server.requests) == 2
+    _assert_each_upload_contains(http_server, payload)
+
+
+def test_retry_multiple_file_uploads_send_complete_bodies_each_attempt(http_server, tmp_path):
+    photo_bytes = b"BUG003-MULTI-PHOTO-PAYLOAD-COMPLETE"
+    banner_bytes = b"BUG003-MULTI-BANNER-PAYLOAD-COMPLETE"
+    photo = tmp_path / "photo.bin"
+    banner = tmp_path / "banner.bin"
+    photo.write_bytes(photo_bytes)
+    banner.write_bytes(banner_bytes)
+    http_server.on("POST", "/upload", json={"ok": True}, fail_times=1)
+    result, _, _ = run_dsl(_suite(http_server, f"""
+TEST: Upload both
+  POST: /upload
+  FILE: avatar FROM {photo}
+  FILE: banner FROM {banner}
+  EXPECT: status == 200 RETRY 3 ON 5xx BACKOFF 0s
+"""))
+    assert result.ok
+    assert len(http_server.requests) == 2
+    _assert_each_upload_contains(http_server, photo_bytes, banner_bytes)
+    for request in http_server.requests:
+        body = request["body"]
+        assert "photo.bin" in body
+        assert "banner.bin" in body
 
 
 def test_duration_printed(http_server):

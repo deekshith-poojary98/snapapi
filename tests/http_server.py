@@ -113,6 +113,7 @@ class _Handler(BaseHTTPRequestHandler):
             "query": parsed.query,
             "headers": {key: value for key, value in self.headers.items()},
             "body": body.decode("utf-8") if body else "",
+            "raw": body,
             "json": payload,
         }
         self.server.router.record(record)

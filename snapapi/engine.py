@@ -18,7 +18,7 @@ import requests
 from colorama import Fore, Style, init
 from requests.auth import HTTPDigestAuth
 
-from snapapi.api_client import APIClient, open_files
+from snapapi.api_client import APIClient, opened_files
 from snapapi.cassette import cassette_key, load_cassettes, parse_vcr_match, save_cassette
 from snapapi.exceptions import CallError, JsonPathError, SnapAPIError, XPathError
 from snapapi.listeners import notify
@@ -728,7 +728,6 @@ class Engine:
 
     def _execute_step(self, client, step, test):
         method = step["action"]
-        handles = []
         try:
             self._apply_preps(step)
             endpoint = self._interp(step["endpoint"])
@@ -749,7 +748,6 @@ class Engine:
                     self._interp(digest.get("username") or ""),
                     self._interp(digest.get("password") or ""),
                 )
-            files, handles = open_files(step.get("files"), self._base_dir())
         except SnapAPIError as exc:
             self._print_error(str(exc), under_request=False)
             return False, str(exc), None
@@ -787,130 +785,131 @@ class Engine:
         if wait:
             attempts = max(attempts, WAIT_MAX_ATTEMPTS)
 
-        try:
-            for attempt in range(1, attempts + 1):
-                response = None
-                started = time.perf_counter()
-                try:
-                    response = self._dispatch(
+        for attempt in range(1, attempts + 1):
+            response = None
+            started = time.perf_counter()
+            try:
+                response = self._dispatch_with_files(
+                    client,
+                    step,
+                    method,
+                    endpoint,
+                    data=data,
+                    raw_body=raw_body,
+                    headers=headers,
+                    body_type=body_type,
+                    content_type=step.get("content_type"),
+                    follow_redirects=follow,
+                    auth=auth,
+                )
+                if (
+                    getattr(response, "status_code", None) == 401
+                    and oauth
+                    and self._oauth_can_refresh(oauth)
+                ):
+                    token = self._oauth_token(oauth, force_refresh=True)
+                    headers["Authorization"] = f"Bearer {token}"
+                    response = self._dispatch_with_files(
                         client,
+                        step,
                         method,
                         endpoint,
                         data=data,
                         raw_body=raw_body,
                         headers=headers,
-                        files=files or None,
                         body_type=body_type,
                         content_type=step.get("content_type"),
                         follow_redirects=follow,
                         auth=auth,
                     )
-                    if (
-                        getattr(response, "status_code", None) == 401
-                        and oauth
-                        and self._oauth_can_refresh(oauth)
-                    ):
-                        token = self._oauth_token(oauth, force_refresh=True)
-                        headers["Authorization"] = f"Bearer {token}"
-                        response = self._dispatch(
-                            client,
-                            method,
-                            endpoint,
-                            data=data,
-                            raw_body=raw_body,
-                            headers=headers,
-                            files=files or None,
-                            body_type=body_type,
-                            content_type=step.get("content_type"),
-                            follow_redirects=follow,
-                            auth=auth,
-                        )
-                    duration_ms = (time.perf_counter() - started) * 1000
-                    self._last_duration = duration_ms
-                    url = getattr(response, "url", endpoint)
-                    recorded = RequestResult(
-                        method,
-                        url,
-                        status_code=response.status_code,
-                        duration_ms=duration_ms,
-                        request_headers=headers,
-                        request_body=raw_body if raw_body is not None else data,
-                        response_headers=dict(getattr(response, "headers", {}) or {}),
-                        response_body=_response_text(response),
-                    )
-                    self._print_request(method, endpoint, response.status_code, duration_ms)
-                    if wait:
-                        self._execute_check(wait["check"], response, duration_ms, method, url)
-                    failures = []
-                    for check in checks:
-                        try:
-                            self._execute_check(check, response, duration_ms, method, url)
-                        except AssertionError as exc:
-                            failures.append(str(exc).strip())
-                    if failures:
-                        raise AssertionError("\n".join(failures))
-                    if self._openapi_spec is not None:
-                        self._validate_openapi(
-                            self._openapi_spec, method, url, response, strict=self.contract_strict
-                        )
-                    for save in step.get("saves") or []:
-                        self._save_value(save, response)
-                    return True, None, recorded
-                except AssertionError as exc:
-                    duration_ms = (time.perf_counter() - started) * 1000
-                    last_error = str(exc).strip()
-                    recorded = RequestResult(
-                        method,
-                        endpoint,
-                        status_code=None if response is None else response.status_code,
-                        duration_ms=duration_ms,
-                        error=last_error,
-                        request_headers=headers,
-                        request_body=raw_body if raw_body is not None else data,
-                        response_headers=dict(getattr(response, "headers", {}) or {}) if response is not None else {},
-                        response_body=_response_text(response) if response is not None else None,
-                    )
-                    retryable = _is_retryable(retry_on, response, network=False)
-                except (requests.RequestException, ValueError, SnapAPIError) as exc:
-                    duration_ms = (time.perf_counter() - started) * 1000
-                    last_error = str(exc)
-                    recorded = RequestResult(method, endpoint, duration_ms=duration_ms, error=last_error)
-                    self._print_request(method, endpoint, None, duration_ms)
-                    retryable = _is_retryable(retry_on, None, network=True)
-
-                if wait and wait_deadline is not None and time.time() + wait["backoff"] <= wait_deadline:
-                    time.sleep(wait["backoff"])
-                    continue
+                duration_ms = (time.perf_counter() - started) * 1000
+                self._last_duration = duration_ms
+                url = getattr(response, "url", endpoint)
+                recorded = RequestResult(
+                    method,
+                    url,
+                    status_code=response.status_code,
+                    duration_ms=duration_ms,
+                    request_headers=headers,
+                    request_body=raw_body if raw_body is not None else data,
+                    response_headers=dict(getattr(response, "headers", {}) or {}),
+                    response_body=_response_text(response),
+                )
+                self._print_request(method, endpoint, response.status_code, duration_ms)
                 if wait:
-                    if last_error:
-                        self._print_error(last_error)
-                        if self.dump_on_fail and recorded:
-                            self._print_dump(recorded)
-                        self._emit_on_fail(test, recorded)
-                    return False, last_error, recorded
-                if attempt < attempts and retryable:
-                    delay = retry_backoff if retry_backoff is not None else self.retry_backoff * attempt
-                    time.sleep(delay)
-                    continue
+                    self._execute_check(wait["check"], response, duration_ms, method, url)
+                failures = []
+                for check in checks:
+                    try:
+                        self._execute_check(check, response, duration_ms, method, url)
+                    except AssertionError as exc:
+                        failures.append(str(exc).strip())
+                if failures:
+                    raise AssertionError("\n".join(failures))
+                if self._openapi_spec is not None:
+                    self._validate_openapi(
+                        self._openapi_spec, method, url, response, strict=self.contract_strict
+                    )
+                for save in step.get("saves") or []:
+                    self._save_value(save, response)
+                return True, None, recorded
+            except AssertionError as exc:
+                duration_ms = (time.perf_counter() - started) * 1000
+                last_error = str(exc).strip()
+                recorded = RequestResult(
+                    method,
+                    endpoint,
+                    status_code=None if response is None else response.status_code,
+                    duration_ms=duration_ms,
+                    error=last_error,
+                    request_headers=headers,
+                    request_body=raw_body if raw_body is not None else data,
+                    response_headers=dict(getattr(response, "headers", {}) or {}) if response is not None else {},
+                    response_body=_response_text(response) if response is not None else None,
+                )
+                retryable = _is_retryable(retry_on, response, network=False)
+            except (requests.RequestException, ValueError, SnapAPIError) as exc:
+                duration_ms = (time.perf_counter() - started) * 1000
+                last_error = str(exc)
+                recorded = RequestResult(method, endpoint, duration_ms=duration_ms, error=last_error)
+                self._print_request(method, endpoint, None, duration_ms)
+                retryable = _is_retryable(retry_on, None, network=True)
 
+            if wait and wait_deadline is not None and time.time() + wait["backoff"] <= wait_deadline:
+                time.sleep(wait["backoff"])
+                continue
+            if wait:
                 if last_error:
                     self._print_error(last_error)
                     if self.dump_on_fail and recorded:
                         self._print_dump(recorded)
                     self._emit_on_fail(test, recorded)
                 return False, last_error, recorded
-            error = last_error
-            if error is None and wait:
-                error = f"WAIT timed out after {WAIT_MAX_ATTEMPTS} attempts"
-            if error:
-                self._print_error(error)
+            if attempt < attempts and retryable:
+                delay = retry_backoff if retry_backoff is not None else self.retry_backoff * attempt
+                time.sleep(delay)
+                continue
+
+            if last_error:
+                self._print_error(last_error)
                 if self.dump_on_fail and recorded:
                     self._print_dump(recorded)
                 self._emit_on_fail(test, recorded)
-            return False, error, recorded
-        finally:
-            for handle in handles:
-                handle.close()
+            return False, last_error, recorded
+        error = last_error
+        if error is None and wait:
+            error = f"WAIT timed out after {WAIT_MAX_ATTEMPTS} attempts"
+        if error:
+            self._print_error(error)
+            if self.dump_on_fail and recorded:
+                self._print_dump(recorded)
+            self._emit_on_fail(test, recorded)
+        return False, error, recorded
+
+    def _dispatch_with_files(self, client, step, method, endpoint, **kwargs):
+        with opened_files(step.get("files"), self._base_dir()) as files:
+            kwargs["files"] = files or None
+            return self._dispatch(client, method, endpoint, **kwargs)
 
     def _dispatch(self, client, method, endpoint, **kwargs):
         data = kwargs.get("data")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 
 import requests
@@ -115,11 +116,31 @@ class APIClient:
 def open_files(file_specs, base_dir):
     opened = {}
     handles = []
-    for spec in file_specs or []:
-        path = Path(spec["path"])
-        if not path.is_absolute():
-            path = Path(base_dir) / path
-        handle = path.open("rb")
-        handles.append(handle)
-        opened[spec["field"]] = (path.name, handle)
-    return opened, handles
+    try:
+        for spec in file_specs or []:
+            path = Path(spec["path"])
+            if not path.is_absolute():
+                path = Path(base_dir) / path
+            handle = path.open("rb")
+            handles.append(handle)
+            opened[spec["field"]] = (path.name, handle)
+        return opened, handles
+    except Exception:
+        for handle in handles:
+            handle.close()
+        raise
+
+
+@contextmanager
+def opened_files(file_specs, base_dir):
+    """Open FILE uploads for a single HTTP attempt and close them afterwards.
+
+    ``requests`` consumes file objects while building the body, so callers must
+    not reuse the same handles across RETRY/WAIT attempts.
+    """
+    opened, handles = open_files(file_specs, base_dir)
+    try:
+        yield opened
+    finally:
+        for handle in handles:
+            handle.close()

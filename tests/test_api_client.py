@@ -1,4 +1,8 @@
-from snapapi.api_client import APIClient
+from pathlib import Path
+
+import pytest
+
+from snapapi.api_client import APIClient, open_files, opened_files
 
 
 def test_post_sends_body_once(http_server):
@@ -31,3 +35,49 @@ def test_head_and_options(http_server):
     client = APIClient(http_server.base_url, timeout=2)
     assert client.head("/x").status_code == 204
     assert client.options("/cors").status_code == 204
+
+
+def test_opened_files_closes_handles(tmp_path):
+    path = tmp_path / "avatar.bin"
+    path.write_bytes(b"avatar-bytes")
+    specs = [{"field": "avatar", "path": str(path)}]
+    with opened_files(specs, tmp_path) as files:
+        handle = files["avatar"][1]
+        assert files["avatar"][0] == "avatar.bin"
+        assert handle.read() == b"avatar-bytes"
+        assert not handle.closed
+    assert handle.closed
+
+
+def test_opened_files_closes_handles_on_error(tmp_path):
+    path = tmp_path / "avatar.bin"
+    path.write_bytes(b"avatar-bytes")
+    specs = [{"field": "avatar", "path": str(path)}]
+    handle = None
+    with pytest.raises(RuntimeError, match="boom"):
+        with opened_files(specs, tmp_path) as files:
+            handle = files["avatar"][1]
+            raise RuntimeError("boom")
+    assert handle is not None and handle.closed
+
+
+def test_open_files_closes_already_opened_handles_on_partial_failure(tmp_path, monkeypatch):
+    existing = tmp_path / "ok.bin"
+    existing.write_bytes(b"ok")
+    specs = [
+        {"field": "ok", "path": str(existing)},
+        {"field": "missing", "path": str(tmp_path / "missing.bin")},
+    ]
+    opened = []
+    original_open = Path.open
+
+    def tracking_open(self, *args, **kwargs):
+        handle = original_open(self, *args, **kwargs)
+        opened.append(handle)
+        return handle
+
+    monkeypatch.setattr(Path, "open", tracking_open)
+    with pytest.raises(FileNotFoundError):
+        open_files(specs, tmp_path)
+    assert opened
+    assert all(handle.closed for handle in opened)
