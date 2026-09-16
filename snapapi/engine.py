@@ -808,7 +808,8 @@ class Engine:
 
         checks = step.get("checks") or []
         wait = step.get("wait")
-        attempts = max((check.get("retry") or 1) for check in checks) if checks else 1
+        # RETRY owns the outer budget; WAIT polls inside each attempt (Model A).
+        retry_attempts = max((check.get("retry") or 1) for check in checks) if checks else 1
         retry_on = next((check.get("retry_on") for check in checks if check.get("retry_on")), None)
         retry_backoff = next((check.get("retry_backoff") for check in checks if check.get("retry_backoff")), None)
         last_error = None
@@ -816,14 +817,29 @@ class Engine:
         body_type = step.get("body_type") or "json"
         follow = step.get("follow_redirects")
         oauth = step.get("oauth2") or test.get("oauth2") or self.suite.get("oauth2")
-        wait_deadline = time.time() + wait["timeout"] if wait else None
-        if wait:
-            attempts = max(attempts, WAIT_MAX_ATTEMPTS)
 
-        for attempt in range(1, attempts + 1):
-            response = None
-            started = time.perf_counter()
-            try:
+        def _send_once():
+            started_at = time.perf_counter()
+            response = self._dispatch_with_files(
+                client,
+                step,
+                method,
+                endpoint,
+                data=data,
+                raw_body=raw_body,
+                headers=headers,
+                body_type=body_type,
+                content_type=step.get("content_type"),
+                follow_redirects=follow,
+                auth=auth,
+            )
+            if (
+                getattr(response, "status_code", None) == 401
+                and oauth
+                and self._oauth_can_refresh(oauth)
+            ):
+                token = self._oauth_token(oauth, force_refresh=True)
+                headers["Authorization"] = f"Bearer {token}"
                 response = self._dispatch_with_files(
                     client,
                     step,
@@ -837,42 +853,39 @@ class Engine:
                     follow_redirects=follow,
                     auth=auth,
                 )
-                if (
-                    getattr(response, "status_code", None) == 401
-                    and oauth
-                    and self._oauth_can_refresh(oauth)
-                ):
-                    token = self._oauth_token(oauth, force_refresh=True)
-                    headers["Authorization"] = f"Bearer {token}"
-                    response = self._dispatch_with_files(
-                        client,
-                        step,
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            self._last_duration = duration_ms
+            url = getattr(response, "url", endpoint)
+            result = RequestResult(
+                method,
+                url,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+                request_headers=headers,
+                request_body=raw_body if raw_body is not None else data,
+                response_headers=dict(getattr(response, "headers", {}) or {}),
+                response_body=_response_text(response),
+            )
+            self._print_request(method, endpoint, response.status_code, duration_ms)
+            return response, result, duration_ms, url
+
+        for attempt in range(1, retry_attempts + 1):
+            response = None
+            attempt_started = time.perf_counter()
+            retryable = False
+            try:
+                if wait:
+                    response, recorded, duration_ms, url, wait_error = self._wait_poll(
+                        _send_once,
+                        wait,
                         method,
                         endpoint,
-                        data=data,
-                        raw_body=raw_body,
-                        headers=headers,
-                        body_type=body_type,
-                        content_type=step.get("content_type"),
-                        follow_redirects=follow,
-                        auth=auth,
                     )
-                duration_ms = (time.perf_counter() - started) * 1000
-                self._last_duration = duration_ms
-                url = getattr(response, "url", endpoint)
-                recorded = RequestResult(
-                    method,
-                    url,
-                    status_code=response.status_code,
-                    duration_ms=duration_ms,
-                    request_headers=headers,
-                    request_body=raw_body if raw_body is not None else data,
-                    response_headers=dict(getattr(response, "headers", {}) or {}),
-                    response_body=_response_text(response),
-                )
-                self._print_request(method, endpoint, response.status_code, duration_ms)
-                if wait:
-                    self._execute_check(wait["check"], response, duration_ms, method, url)
+                    if wait_error:
+                        raise AssertionError(wait_error)
+                else:
+                    response, recorded, duration_ms, url = _send_once()
+
                 failures = []
                 for check in checks:
                     try:
@@ -888,7 +901,7 @@ class Engine:
                 self._commit_saves(step.get("saves") or [], response)
                 return True, None, recorded
             except AssertionError as exc:
-                duration_ms = (time.perf_counter() - started) * 1000
+                duration_ms = (time.perf_counter() - attempt_started) * 1000
                 last_error = str(exc).strip()
                 recorded = RequestResult(
                     method,
@@ -903,23 +916,13 @@ class Engine:
                 )
                 retryable = _is_retryable(retry_on, response, network=False)
             except (requests.RequestException, ValueError, SnapAPIError) as exc:
-                duration_ms = (time.perf_counter() - started) * 1000
+                duration_ms = (time.perf_counter() - attempt_started) * 1000
                 last_error = str(exc)
                 recorded = RequestResult(method, endpoint, duration_ms=duration_ms, error=last_error)
                 self._print_request(method, endpoint, None, duration_ms)
                 retryable = _is_retryable(retry_on, None, network=True)
 
-            if wait and wait_deadline is not None and time.time() + wait["backoff"] <= wait_deadline:
-                time.sleep(wait["backoff"])
-                continue
-            if wait:
-                if last_error:
-                    self._print_error(last_error)
-                    if self.dump_on_fail and recorded:
-                        self._print_dump(recorded)
-                    self._emit_on_fail(test, recorded)
-                return False, last_error, recorded
-            if attempt < attempts and retryable:
+            if attempt < retry_attempts and retryable:
                 delay = retry_backoff if retry_backoff is not None else self.retry_backoff * attempt
                 time.sleep(delay)
                 continue
@@ -930,15 +933,51 @@ class Engine:
                     self._print_dump(recorded)
                 self._emit_on_fail(test, recorded)
             return False, last_error, recorded
-        error = last_error
-        if error is None and wait:
-            error = f"WAIT timed out after {WAIT_MAX_ATTEMPTS} attempts"
-        if error:
-            self._print_error(error)
+
+        if last_error:
+            self._print_error(last_error)
             if self.dump_on_fail and recorded:
                 self._print_dump(recorded)
             self._emit_on_fail(test, recorded)
-        return False, error, recorded
+        return False, last_error, recorded
+
+    def _wait_poll(self, send_once, wait, method, endpoint):
+        """Poll ``send_once`` until the WAIT check passes or timeout/cap.
+
+        Uses WAIT TIMEOUT/BACKOFF only. Does not consume RETRY budget — the caller
+        owns RETRY N / ON / BACKOFF around this poll.
+
+        Returns ``(response, recorded, duration_ms, url, error)``. On success
+        ``error`` is None; on timeout ``response`` is the last poll (if any).
+        """
+        deadline = time.time() + wait["timeout"]
+        last_error = None
+        response = None
+        recorded = None
+        duration_ms = 0
+        url = endpoint
+        for poll in range(1, WAIT_MAX_ATTEMPTS + 1):
+            poll_started = time.perf_counter()
+            try:
+                response, recorded, duration_ms, url = send_once()
+                self._execute_check(wait["check"], response, duration_ms, method, url)
+                return response, recorded, duration_ms, url, None
+            except AssertionError as exc:
+                last_error = str(exc).strip()
+            except (requests.RequestException, ValueError, SnapAPIError) as exc:
+                last_error = str(exc)
+                self._print_request(
+                    method, endpoint, None, (time.perf_counter() - poll_started) * 1000
+                )
+
+            if time.time() + wait["backoff"] <= deadline and poll < WAIT_MAX_ATTEMPTS:
+                time.sleep(wait["backoff"])
+                continue
+            break
+
+        if last_error is None:
+            last_error = f"WAIT timed out after {WAIT_MAX_ATTEMPTS} attempts"
+        return response, recorded, duration_ms, url, last_error
 
     def _dispatch_with_files(self, client, step, method, endpoint, **kwargs):
         with opened_files(step.get("files"), self._base_dir()) as files:

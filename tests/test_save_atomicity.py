@@ -243,7 +243,7 @@ TEST: Wait then save
         )
     )
     assert not result.ok
-    assert state["n"] >= 2  # pending → ready; WAIT may keep retrying after SAVE fails
+    assert state["n"] == 2  # pending → ready, then SAVE fails the attempt (no WAIT re-poll)
     assert "A" not in engine.variables
     assert "B" not in engine.variables
 
