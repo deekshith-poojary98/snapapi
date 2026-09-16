@@ -97,6 +97,7 @@ TEST: Mixed
 
 
 def test_duplicate_save_names_last_wins(http_server):
+    """Duplicate SAVE names in one batch: declaration order, last write wins."""
     http_server.on("GET", "/item", json={"id": 1, "name": "second"})
     result, engine, _ = run_dsl(
         _suite(

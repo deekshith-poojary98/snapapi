@@ -956,8 +956,13 @@ class Engine:
         auth = kwargs.get("auth")
         url = client._build_url(endpoint)
         body = raw_body if raw_body is not None else data
+        needs_key = self.mode in ("replay", "record") or self.record_on_miss
+        key = (
+            cassette_key(method, url, body, headers=headers, match=self.vcr_match, files=files)
+            if needs_key
+            else None
+        )
         if self.mode == "replay":
-            key = cassette_key(method, url, body, headers=headers, match=self.vcr_match)
             record = self._cassettes.get(key)
             if not record:
                 if self.record_on_miss:
@@ -992,7 +997,6 @@ class Engine:
             auth=auth,
         )
         if self.mode == "record":
-            key = cassette_key(method, url, body, headers=headers, match=self.vcr_match)
             self._store_cassette(key, method, url, response)
         return response
 
@@ -1270,7 +1274,10 @@ class Engine:
             raise AssertionError(str(exc)) from exc
 
     def _commit_saves(self, saves, response):
-        """Extract every SAVE in the batch, then commit all or none."""
+        """Extract every SAVE in the batch, then commit all or none.
+
+        Duplicate names in one batch are allowed: declaration order, last write wins.
+        """
         if not saves:
             return
         pending = []
