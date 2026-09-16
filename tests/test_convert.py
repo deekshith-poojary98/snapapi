@@ -80,3 +80,70 @@ def test_json_flag_sets_headers_and_post():
     assert "HEADER Accept: application/json" in result.text
     assert 'BODY: {"name": "Jane"}' in result.text
     parse_dsl(result.text)
+
+
+def _parsed_step(curl):
+    result = curl_to_sapi(curl)
+    suite = parse_dsl(result.text)
+    return result, suite["tests"][0]["steps"][0]
+
+
+def test_method_precedence_data_implies_post():
+    _, step = _parsed_step("curl https://api.example.com/x -d a=1")
+    assert step["action"] == "POST"
+    assert step["data"] == {"a": "1"}
+
+
+def test_method_precedence_explicit_get_with_data_stays_get():
+    """curl -X GET -d sends GET with a body; -X must not be overridden to POST."""
+    _, step = _parsed_step("curl -X GET https://api.example.com/x -d a=1")
+    assert step["action"] == "GET"
+    assert step["data"] == {"a": "1"}
+
+
+def test_method_precedence_explicit_post_with_data():
+    _, step = _parsed_step("curl -X POST https://api.example.com/x -d a=1")
+    assert step["action"] == "POST"
+    assert step["data"] == {"a": "1"}
+
+
+def test_method_precedence_data_binary_at_file_implies_post():
+    _, step = _parsed_step("curl https://api.example.com/x --data-binary @file.bin")
+    assert step["action"] == "POST"
+    assert step["body_type"] == "raw"
+    assert step["raw_body"] == "${FILE_BODY}"
+
+
+def test_method_precedence_explicit_get_data_binary_stays_get():
+    _, step = _parsed_step("curl -X GET https://api.example.com/x --data-binary @file.bin")
+    assert step["action"] == "GET"
+    assert step["body_type"] == "raw"
+    assert step["raw_body"] == "${FILE_BODY}"
+
+
+def test_method_precedence_get_flag_with_data_as_query():
+    _, step = _parsed_step("curl -G https://api.example.com/search -d q=1")
+    assert step["action"] == "GET"
+    assert step["data"] is None
+    assert step["query"] == {"q": "1"}
+
+
+def test_method_precedence_explicit_get_with_g_and_data():
+    _, step = _parsed_step("curl -X GET -G https://api.example.com/search -d q=1")
+    assert step["action"] == "GET"
+    assert step["query"] == {"q": "1"}
+    assert step["data"] is None
+
+
+def test_method_precedence_explicit_post_with_g_and_data():
+    _, step = _parsed_step("curl -X POST -G https://api.example.com/search -d q=1")
+    assert step["action"] == "POST"
+    assert step["query"] == {"q": "1"}
+    assert step["data"] is None
+
+
+def test_method_precedence_explicit_get_with_json_stays_get():
+    _, step = _parsed_step("curl -X GET https://api.example.com/x --json '{\"a\":1}'")
+    assert step["action"] == "GET"
+    assert step["data"] == {"a": 1}
+    assert step["body_type"] == "json"

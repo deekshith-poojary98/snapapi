@@ -3,17 +3,16 @@
     "Body from file"
   ],
   "must_contain": [
-    "POST: /x",
+    "POST: /upload",
     "${FILE_BODY}"
   ],
   "must_not_contain": [
-    "@payload.json",
-    "BODY: @payload.json",
-    "GET: /x"
+    "GET: /upload"
   ],
   "semantic": {
     "method": "POST",
-    "endpoint": "/x",
-    "body_type": "raw"
+    "endpoint": "/upload",
+    "body_type": "raw",
+    "raw_body": "${FILE_BODY}"
   }
 }

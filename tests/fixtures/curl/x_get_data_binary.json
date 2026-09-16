@@ -1,0 +1,17 @@
+{
+  "warnings_contain": [
+    "Body from file"
+  ],
+  "must_contain": [
+    "GET: /upload"
+  ],
+  "must_not_contain": [
+    "POST: /upload"
+  ],
+  "semantic": {
+    "method": "GET",
+    "endpoint": "/upload",
+    "body_type": "raw",
+    "raw_body": "${FILE_BODY}"
+  }
+}

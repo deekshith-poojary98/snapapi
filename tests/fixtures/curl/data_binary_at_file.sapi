@@ -1,6 +1,6 @@
 SUITE: Converted Request
 URL: https://api.example.com
 
-TEST: Create X
-  POST: /x
+TEST: Create Upload
+  POST: /upload
   BODY: raw text/plain ${FILE_BODY}
