@@ -3,9 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
+import requests
+
 from snapapi.engine import Engine
 from snapapi.exceptions import SnapAPIError
-from tests.helpers import parse_dsl, run_dsl
+from tests.helpers import parse_dsl, run_dsl, stub_dns_rebinding, stub_public_host_http
 
 
 def _suite(server, body):
@@ -1248,4 +1250,278 @@ TEST: Number length
     error = (result.tests[0].error or "").lower()
     assert "length" in error
     assert "number" in error or "int" in error
+
+
+def test_safe_url_blocks_oauth_loopback_token_url(http_server):
+    http_server.on("POST", "/oauth/token", json={"access_token": "should-not-issue"})
+    http_server.on("GET", "/public", json={"ok": True})
+    result, _, _ = run_dsl(
+        f"""
+SUITE: Safe
+URL: http://example.com
+TEST: Token
+  GET: /public
+  AUTH: oauth2 token_url={http_server.base_url}/oauth/token client_id=id client_secret=s
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = result.tests[0].error or ""
+    assert "Blocked" in error
+    assert "127.0.0.1" in error
+    assert http_server.requests == []
+
+
+def test_safe_url_blocks_oauth_private_token_url(monkeypatch, http_server):
+    http_server.on("POST", "/oauth/token", json={"access_token": "should-not-issue"})
+
+    def fail_send(*args, **kwargs):
+        raise AssertionError("HTTP send must not run for a private OAuth token URL")
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", fail_send)
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: Token
+  GET: /public
+  AUTH: oauth2 token_url=http://10.0.0.1:9/oauth/token client_id=id client_secret=s
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = result.tests[0].error or ""
+    assert "Blocked" in error
+    assert "10.0.0.1" in error
+    assert http_server.requests == []
+
+
+def test_oauth_loopback_token_url_still_works_without_safe_url(http_server):
+    http_server.on("POST", "/oauth/token", json={"access_token": "tok-ok"})
+    http_server.on("GET", "/secure", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            f"""
+TEST: Token
+  GET: /secure
+  AUTH: oauth2 token_url={http_server.base_url}/oauth/token client_id=id client_secret=s
+  EXPECT: status == 200
+""",
+        ),
+        safe_url=False,
+        timeout=2,
+    )
+    assert result.ok
+    assert [item["path"] for item in http_server.requests] == ["/oauth/token", "/secure"]
+    assert http_server.requests[1]["headers"].get("Authorization") == "Bearer tok-ok"
+
+
+def test_safe_url_blocks_redirect_to_loopback(http_server, monkeypatch):
+    http_server.on("GET", "/secret", json={"pwned": True})
+    sent = stub_public_host_http(
+        monkeypatch,
+        {"/start": (302, {"Location": f"{http_server.base_url}/secret"}, b"")},
+    )
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: Redir
+  GET: /start
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = result.tests[0].error or ""
+    assert "Blocked" in error
+    assert "127.0.0.1" in error
+    assert http_server.requests == []
+    assert sent == ["http://example.com/start"]
+    assert all("127.0.0.1" not in url for url in sent)
+
+
+def test_safe_url_blocks_oauth_token_redirect_to_loopback(http_server, monkeypatch):
+    http_server.on("POST", "/oauth/token", json={"access_token": "leaked"})
+    http_server.on("GET", "/oauth/token", json={"access_token": "leaked"})
+    sent = stub_public_host_http(
+        monkeypatch,
+        {"/token": (302, {"Location": f"{http_server.base_url}/oauth/token"}, b"")},
+    )
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: TokenRedir
+  GET: /public
+  AUTH: oauth2 token_url=http://example.com/token client_id=id client_secret=s
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = result.tests[0].error or ""
+    assert "Blocked" in error
+    assert "127.0.0.1" in error
+    assert http_server.requests == []
+    assert sent == ["http://example.com/token"]
+    assert all("127.0.0.1" not in url for url in sent)
+
+
+def test_safe_url_allows_redirect_between_public_urls(monkeypatch):
+    stub_public_host_http(
+        monkeypatch,
+        {
+            "/from": (302, {"Location": "http://example.com/to"}, b""),
+            "/to": (200, {"Content-Type": "application/json"}, b'{"ok": true}'),
+        },
+    )
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: Redir
+  GET: /from
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert result.ok
+    assert result.tests[0].status == "passed"
+
+
+def test_safe_url_still_blocks_metadata_host():
+    result, _, _ = run_dsl(
+        """
+SUITE: Unsafe
+URL: http://169.254.169.254
+TEST: Meta
+  GET: /latest
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    assert "Blocked" in (result.tests[0].error or "")
+
+
+def test_safe_url_blocks_dns_rebinding_engine(http_server, monkeypatch):
+    http_server.on("GET", "/secret", json={"pwned": True})
+    host = "rebinder.test"
+    stub_dns_rebinding(monkeypatch, host, connect_ip="127.0.0.1")
+    result, _, _ = run_dsl(
+        f"""
+SUITE: Safe
+URL: http://{host}:{http_server.port}
+TEST: Rebind
+  GET: /secret
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    assert "Blocked" in (result.tests[0].error or "")
+    assert http_server.requests == []
+
+
+def test_safe_url_blocks_oauth_dns_rebinding_secret(http_server, monkeypatch):
+    http_server.on("POST", "/oauth/token", json={"access_token": "leaked"})
+    host = "rebinder.test"
+    stub_dns_rebinding(monkeypatch, host, connect_ip="127.0.0.1")
+    result, _, _ = run_dsl(
+        f"""
+SUITE: Safe
+URL: http://example.com
+TEST: Token
+  GET: /public
+  AUTH: oauth2 token_url=http://{host}:{http_server.port}/oauth/token client_id=id client_secret=SUPERSECRET
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    assert "Blocked" in (result.tests[0].error or "")
+    assert http_server.requests == []
+    assert all("SUPERSECRET" not in (item.get("body") or "") for item in http_server.requests)
+
+
+def test_safe_url_blocks_env_http_proxy_engine(http_server, monkeypatch):
+    http_server.on("GET", "/start", json={"via-proxy": True})
+    monkeypatch.setenv("HTTP_PROXY", http_server.base_url)
+    monkeypatch.setenv("http_proxy", http_server.base_url)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    stub_public_host_http(monkeypatch, {"/start": (200, {"Content-Type": "application/json"}, b'{"ok": true}')})
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: Direct
+  GET: /start
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert result.ok
+    assert http_server.requests == [], "env HTTP_PROXY must not receive traffic under safe_url"
+
+
+def test_safe_url_blocks_explicit_loopback_proxy_engine(http_server):
+    http_server.on("GET", "/start", json={"via-proxy": True})
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: Proxied
+  GET: /start
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+        proxies={"http": http_server.base_url, "https": http_server.base_url},
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    assert "Blocked" in (result.tests[0].error or "")
+    assert http_server.requests == []
+
+
+def test_safe_url_blocks_cgnat_engine(monkeypatch):
+    def fail_send(*args, **kwargs):
+        raise AssertionError("HTTP send must not run for CGNAT destinations")
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", fail_send)
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://100.100.100.200
+TEST: Cgnat
+  GET: /
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    assert "Blocked" in (result.tests[0].error or "")
 

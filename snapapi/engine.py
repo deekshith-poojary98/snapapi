@@ -707,7 +707,11 @@ class Engine:
             follow = self.suite.get("follow_redirects")
         if follow is None:
             follow = True
-        client = self._new_client(base_url, follow_redirects=follow)
+        try:
+            client = self._new_client(base_url, follow_redirects=follow)
+        except SnapAPIError as exc:
+            self._print_error(str(exc), under_request=False)
+            return False, str(exc), []
         self._client = client
         oauth = test.get("oauth2") or self.suite.get("oauth2")
         if oauth:
@@ -1471,6 +1475,7 @@ class Engine:
             verify=self.verify,
             cert=self.cert,
             proxies=self.proxies or None,
+            safe_url=self.safe_url,
         )
 
     def _primary_tests(self):
