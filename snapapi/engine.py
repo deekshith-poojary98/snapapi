@@ -16,6 +16,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import requests
 from colorama import Fore, Style, init
 from requests.auth import HTTPDigestAuth
+from requests.structures import CaseInsensitiveDict
 
 from snapapi.api_client import APIClient, opened_files
 from snapapi.cassette import cassette_key, load_cassettes, parse_vcr_match, save_cassette
@@ -2129,7 +2130,8 @@ def _is_retryable(retry_on, response, network=False):
 
 def _fake_response(record, session=None):
     body = record.get("body") or ""
-    headers = record.get("headers") or {}
+    # Match live ``requests`` responses: header names are case-insensitive.
+    headers = CaseInsensitiveDict(record.get("headers") or {})
     cookies = _apply_cassette_cookies(session, headers)
 
     def _json():
