@@ -595,6 +595,32 @@ TEST: A
     assert suite["tests"][0]["steps"][0]["headers"]["Authorization"] == "Bearer ${TOKEN}"
 
 
+def test_oauth2_rejects_unused_auth_url():
+    with pytest.raises(ParseError, match="auth_url is not supported"):
+        parse_dsl(
+            """
+SUITE: Demo
+TEST: A
+  GET: /me
+  AUTH: oauth2 grant=authorization_code token_url=http://example.com/token client_id=id code=abc auth_url=http://example.com/auth code_verifier=v pkce=true
+  EXPECT: STATUS 200
+"""
+        )
+
+
+def test_oauth2_rejects_unknown_parameter():
+    with pytest.raises(ParseError, match="unknown parameter"):
+        parse_dsl(
+            """
+SUITE: Demo
+TEST: A
+  GET: /me
+  AUTH: oauth2 token_url=http://example.com/token client_id=id audience=api
+  EXPECT: STATUS 200
+"""
+        )
+
+
 def test_query_and_param_attach_to_request():
     suite = parse_dsl(
         """

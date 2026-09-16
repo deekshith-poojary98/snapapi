@@ -24,6 +24,44 @@ def extract(data, path):
     return _extract_tokens(data, _tokenize(path[1:]), path)
 
 
+def count_matches(data, path):
+    """Count how many concrete paths under ``path`` resolve.
+
+    Used by ``exists`` / ``absent``. A present key whose value is ``null`` counts.
+    Wildcards (``[*]``) and filters count each matching leaf independently, so
+    ``exists`` means at least one match and ``absent`` means zero matches.
+    """
+    if path is None or path == "" or path == "$":
+        return 1
+    if not isinstance(path, str) or not path.startswith("$"):
+        raise JsonPathError(f"JSONPath must start with $: {path!r}")
+    return _count_tokens(data, _tokenize(path[1:]), path)
+
+
+def _count_tokens(current, tokens, path):
+    if not tokens:
+        return 1
+    token = tokens[0]
+    rest = tokens[1:]
+    if _is_filter(token):
+        items = current if isinstance(current, list) else [current]
+        filtered = [item for item in items if _match_filter(item, token)]
+        if not rest:
+            return len(filtered)
+        return sum(_count_tokens(item, rest, path) for item in filtered)
+    if token == "*":
+        if not isinstance(current, list):
+            return 0
+        if not rest:
+            return len(current)
+        return sum(_count_tokens(item, rest, path) for item in current)
+    try:
+        nxt = _step(current, token, path)
+    except JsonPathError:
+        return 0
+    return _count_tokens(nxt, rest, path)
+
+
 def _extract_tokens(current, tokens, path):
     if not tokens:
         return current

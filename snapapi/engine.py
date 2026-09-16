@@ -1078,16 +1078,13 @@ class Engine:
         operator = check["operator"]
         op_upper = _norm_operator(operator)
         if op_upper in ("ABSENT", "EXISTS"):
-            try:
-                actual = jsonpath.extract(body, path)
-                found = True
-            except JsonPathError:
-                actual = None
-                found = False
+            count = jsonpath.count_matches(body, path)
             if op_upper == "ABSENT":
-                assert not found, f"JSON {path} should be absent, got {actual!r}"
+                assert count == 0, (
+                    f"JSON {path} should be absent, found {count} match(es)"
+                )
             else:
-                assert found, f"JSON {path} should exist"
+                assert count >= 1, f"JSON {path} should exist"
             return
         try:
             actual = jsonpath.extract(body, path)

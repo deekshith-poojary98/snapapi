@@ -12,6 +12,19 @@ from snapapi.exceptions import ParseError
 
 HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
 REQUEST_METHODS = set(HTTP_METHODS)
+_OAUTH2_KNOWN_KEYS = {
+    "token_url",
+    "client_id",
+    "client_secret",
+    "grant",
+    "grant_type",
+    "username",
+    "password",
+    "code",
+    "redirect_uri",
+    "pkce",
+    "code_verifier",
+}
 LINE_KEYWORD_RE = re.compile(r"^([A-Z][A-Z0-9_-]*):(.*)$")
 HEADER_LINE_RE = re.compile(r"^HEADER\s+(\S+)\s*:\s*(.*)$")
 SPACED_KEYWORD_RE = re.compile(r"^([A-Z][A-Z0-9_-]*(?:\s+[A-Z][A-Z0-9_-]*)+)\s*:(.*)$")
@@ -808,6 +821,21 @@ class TestParser:
                     lineno=lineno,
                 )
             params.setdefault("grant", grant)
+            unknown = sorted(set(params) - _OAUTH2_KNOWN_KEYS)
+            if unknown:
+                if "auth_url" in unknown:
+                    raise ParseError(
+                        "AUTH oauth2 auth_url is not supported; SnapAPI does not open a "
+                        "browser or call the authorize endpoint. Supply code=${AUTH_CODE} "
+                        "and, for PKCE, code_verifier=...",
+                        filename=filename,
+                        lineno=lineno,
+                    )
+                raise ParseError(
+                    "AUTH oauth2 unknown parameter(s): " + ", ".join(unknown),
+                    filename=filename,
+                    lineno=lineno,
+                )
             pkce = str(params.get("pkce") or "").strip().lower()
             if pkce in ("1", "true", "yes", "on"):
                 if grant != "authorization_code":

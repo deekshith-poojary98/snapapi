@@ -323,6 +323,12 @@ TEST: T
   assert(moreChecks[5].operator === "CONTAINS-ANY", moreChecks[5].operator);
   assert(moreChecks[6].operator === "EMPTY", moreChecks[6].operator);
   assert(moreChecks[7].operator === "MATCHES", moreChecks[7].operator);
+
+  assert(pg.countMatches({ items: [] }, "$.items[*].password") === 0, "empty wildcard");
+  assert(pg.countMatches({ items: [{ id: 1 }] }, "$.items[*].password") === 0, "missing field");
+  assert(pg.countMatches({ items: [{ id: 1 }, { id: 2, password: "x" }] }, "$.items[*].password") === 1, "mixed");
+  assert(pg.countMatches({ items: [{ password: null }] }, "$.items[*].password") === 1, "null present");
+  assert(pg.countMatches({ password: null }, "$.password") === 1, "scalar null");
 }
 
 async function main() {

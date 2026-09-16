@@ -44,3 +44,26 @@ def test_filter_equality():
 def test_filter_root_array():
     data = [{"x": 1}, {"x": 2}]
     assert extract(data, "$[?(@.x==1)]") == [{"x": 1}]
+
+
+def test_count_matches_scalar_and_null():
+    from snapapi.jsonpath import count_matches
+
+    assert count_matches({"id": 1}, "$.id") == 1
+    assert count_matches({"id": 1}, "$.missing") == 0
+    assert count_matches({"password": None}, "$.password") == 1
+    assert count_matches({"a": 1}, "$") == 1
+
+
+def test_count_matches_wildcard_presence():
+    from snapapi.jsonpath import count_matches
+
+    assert count_matches({"items": []}, "$.items[*].password") == 0
+    assert count_matches({"items": [{"id": 1}]}, "$.items[*].password") == 0
+    assert count_matches({"items": [{"id": 1, "password": "x"}]}, "$.items[*].password") == 1
+    assert count_matches(
+        {"items": [{"id": 1}, {"id": 2, "password": "x"}]},
+        "$.items[*].password",
+    ) == 1
+    assert count_matches({"items": [{"password": None}]}, "$.items[*].password") == 1
+    assert count_matches({"items": [{"id": 1}, {"id": 2}]}, "$.items[*]") == 2

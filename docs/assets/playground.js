@@ -1059,6 +1059,65 @@
     return extractTokens(data, tokenizePath(path.slice(1)), path);
   }
 
+  function countMatches(data, path) {
+    if (path == null || path === "" || path === "$") return 1;
+    if (typeof path !== "string" || path.charAt(0) !== "$") {
+      throw new Error("JSONPath must start with $: " + JSON.stringify(path));
+    }
+    return countTokens(data, tokenizePath(path.slice(1)), path);
+  }
+
+  function countTokens(current, tokens, path) {
+    if (!tokens.length) return 1;
+    var token = tokens[0];
+    var rest = tokens.slice(1);
+    if (token && token.filter) {
+      var items = Array.isArray(current) ? current : [current];
+      var filtered = items.filter(function (item) {
+        if (!item || typeof item !== "object") return false;
+        var cur = item;
+        var parts = token.field.split(".");
+        for (var p = 0; p < parts.length; p++) {
+          if (!cur || typeof cur !== "object" || !(parts[p] in cur)) return false;
+          cur = cur[parts[p]];
+        }
+        return cur === token.expected;
+      });
+      if (!rest.length) return filtered.length;
+      var filterTotal = 0;
+      for (var f = 0; f < filtered.length; f++) {
+        filterTotal += countTokens(filtered[f], rest, path);
+      }
+      return filterTotal;
+    }
+    if (token === "*") {
+      if (!Array.isArray(current)) return 0;
+      if (!rest.length) return current.length;
+      var wildTotal = 0;
+      for (var w = 0; w < current.length; w++) {
+        wildTotal += countTokens(current[w], rest, path);
+      }
+      return wildTotal;
+    }
+    if (typeof token === "number") {
+      if (current && typeof current === "object" && !Array.isArray(current)) {
+        if (Object.prototype.hasOwnProperty.call(current, String(token))) {
+          return countTokens(current[String(token)], rest, path);
+        }
+        if (Object.prototype.hasOwnProperty.call(current, token)) {
+          return countTokens(current[token], rest, path);
+        }
+        return 0;
+      }
+      if (!Array.isArray(current) || token < 0 || token >= current.length) return 0;
+      return countTokens(current[token], rest, path);
+    }
+    if (current && typeof current === "object" && !Array.isArray(current) && Object.prototype.hasOwnProperty.call(current, token)) {
+      return countTokens(current[token], rest, path);
+    }
+    return 0;
+  }
+
   function extractTokens(current, tokens, path) {
     if (!tokens.length) return current;
     var token = tokens[0];
@@ -1456,18 +1515,10 @@
       var jpath = interpolate(check.path, variables);
       var jop = normOp(check.operator);
       if (jop === "ABSENT" || jop === "EXISTS") {
-        var found = true;
-        var gotAbsent = null;
-        try {
-          gotAbsent = extract(response.json, jpath);
-          // JS property access returns undefined for missing keys (Python raises).
-          found = typeof gotAbsent !== "undefined";
-        } catch (pathErr) {
-          found = false;
-        }
+        var matchCount = countMatches(response.json, jpath);
         if (jop === "ABSENT") {
-          if (found) throw new Error("JSON " + jpath + " should be absent, got " + JSON.stringify(gotAbsent));
-        } else if (!found) {
+          if (matchCount !== 0) throw new Error("JSON " + jpath + " should be absent, found " + matchCount + " match(es)");
+        } else if (matchCount < 1) {
           throw new Error("JSON " + jpath + " should exist");
         }
         return;
@@ -2169,6 +2220,7 @@
     run: run,
     runText: runText,
     extract: extract,
+    countMatches: countMatches,
     createMockApi: createMockApi,
     SAMPLES: SAMPLES,
     formatDuration: formatDuration,

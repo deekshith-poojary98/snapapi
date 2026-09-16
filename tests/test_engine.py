@@ -1114,6 +1114,93 @@ TEST: Missing
     assert "should exist" in (result.tests[0].error or "")
 
 
+def test_expect_absent_exists_wildcard_semantics(http_server):
+    """exists = at least one match; absent = zero matches (null still present)."""
+    cases = [
+        (
+            "empty-list",
+            {"items": []},
+            """
+  EXPECT: json $.items[*].password absent
+  EXPECT: json $.items[*].password exists
+""",
+            False,
+            "should exist",
+        ),
+        (
+            "no-password",
+            {"items": [{"id": 1}]},
+            """
+  EXPECT: json $.items[*].password absent
+""",
+            True,
+            None,
+        ),
+        (
+            "all-have-password",
+            {"items": [{"id": 1, "password": "x"}]},
+            """
+  EXPECT: json $.items[*].password exists
+  EXPECT: json $.items[*].password absent
+""",
+            False,
+            "should be absent",
+        ),
+        (
+            "mixed-must-not-absent",
+            {"items": [{"id": 1}, {"id": 2, "password": "x"}]},
+            """
+  EXPECT: json $.items[*].password absent
+""",
+            False,
+            "should be absent",
+        ),
+        (
+            "mixed-exists-passes",
+            {"items": [{"id": 1}, {"id": 2, "password": "x"}]},
+            """
+  EXPECT: json $.items[*].password exists
+""",
+            True,
+            None,
+        ),
+        (
+            "null-password-is-present",
+            {"items": [{"id": 1, "password": None}]},
+            """
+  EXPECT: json $.items[*].password exists
+  EXPECT: json $.items[*].password absent
+""",
+            False,
+            "should be absent",
+        ),
+        (
+            "scalar-null-present",
+            {"password": None},
+            """
+  EXPECT: json $.password exists
+""",
+            True,
+            None,
+        ),
+    ]
+    for name, payload, expects, ok, error_snip in cases:
+        http_server.on("GET", f"/{name}", json=payload)
+        result, _, _ = run_dsl(
+            _suite(
+                http_server,
+                f"""
+TEST: {name}
+  GET: /{name}
+{expects}
+""",
+            )
+        )
+        assert result.ok is ok, f"{name}: ok={result.ok} error={result.tests[0].error!r}"
+        if error_snip:
+            assert error_snip in (result.tests[0].error or ""), name
+
+
 def test_expect_header_absent(http_server):
     http_server.on("GET", "/ok", json={"ok": True}, headers={"Content-Type": "application/json"})
     result, _, _ = run_dsl(_suite(http_server, """

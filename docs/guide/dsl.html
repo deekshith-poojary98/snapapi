@@ -202,8 +202,8 @@ EXPECT: status == 200 RETRY 5 ON 5xx BACKOFF 1s</code></pre>
           <tr><td><code>json $.x in […]</code> / <code>not in […]</code></td><td>Value in / not in a list</td></tr>
           <tr><td><code>json $.x length == N</code> (also <code>!=</code> <code>&gt;</code> …)</td><td>Length of array/string/object</td></tr>
           <tr><td><code>json $.x empty</code> / <code>not empty</code></td><td>Empty container or string</td></tr>
-          <tr><td><code>json $.x absent</code> / <code>not exists</code></td><td>Path missing (<code>null</code> still counts as present)</td></tr>
-          <tr><td><code>json $.x exists</code> / <code>present</code></td><td>Path resolves</td></tr>
+          <tr><td><code>json $.x absent</code> / <code>not exists</code></td><td>Zero matching paths (<code>null</code> still counts as present). With <code>[*]</code>, every element must lack the field.</td></tr>
+          <tr><td><code>json $.x exists</code> / <code>present</code></td><td>At least one matching path resolves. With <code>[*]</code>, any element having the field is enough.</td></tr>
           <tr><td><code>json $.x type string|number|array|object|boolean|null</code></td><td>JSON type</td></tr>
           <tr><td><code>json $.arr contains-all|contains-only|contains-any […]</code></td><td>Set-style array checks</td></tr>
           <tr><td><code>json $.arr contains-sequence […]</code></td><td>Ordered contiguous sublist</td></tr>
