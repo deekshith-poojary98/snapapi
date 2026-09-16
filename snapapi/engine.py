@@ -885,8 +885,7 @@ class Engine:
                     self._validate_openapi(
                         self._openapi_spec, method, url, response, strict=self.contract_strict
                     )
-                for save in step.get("saves") or []:
-                    self._save_value(save, response)
+                self._commit_saves(step.get("saves") or [], response)
                 return True, None, recorded
             except AssertionError as exc:
                 duration_ms = (time.perf_counter() - started) * 1000
@@ -1245,32 +1244,46 @@ class Engine:
             raise AssertionError(f"Unknown operator {operator}")
         assert ok, f"{label} expected {operator} {right}, got {left}"
 
-    def _save_value(self, save, response):
+    def _extract_save_value(self, save, response):
+        """Resolve one SAVE without writing suite variables."""
         source = (save.get("source") or "json").lower()
         selector = self._interp(save["path"])
         if source == "header":
             value = response.headers.get(selector)
             if value is None:
                 raise AssertionError(f"Cannot SAVE header {selector}: missing")
-        elif source == "cookie":
+            return value
+        if source == "cookie":
             value = response.cookies.get(selector)
             if value is None and hasattr(self._client, "session"):
                 value = self._client.session.cookies.get(selector)
             if value is None:
                 raise AssertionError(f"Cannot SAVE cookie {selector}: missing")
-        else:
-            try:
-                body = response.json()
-            except ValueError as exc:
-                raise AssertionError(f"Cannot SAVE from non-JSON response: {exc}") from exc
-            try:
-                value = jsonpath.extract(body, selector)
-            except JsonPathError as exc:
-                raise AssertionError(str(exc)) from exc
-        self.variables[save["name"]] = value
+            return value
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise AssertionError(f"Cannot SAVE from non-JSON response: {exc}") from exc
+        try:
+            return jsonpath.extract(body, selector)
+        except JsonPathError as exc:
+            raise AssertionError(str(exc)) from exc
+
+    def _commit_saves(self, saves, response):
+        """Extract every SAVE in the batch, then commit all or none."""
+        if not saves:
+            return
+        pending = []
+        for save in saves:
+            pending.append((save, self._extract_save_value(save, response)))
         indent = self._spaces(1)
-        shown = redact_saved(save["name"], value)
-        self._print(self._paint(f"{indent}saved {save['name']}={shown}", Style.DIM))
+        for save, value in pending:
+            self.variables[save["name"]] = value
+            shown = redact_saved(save["name"], value)
+            self._print(self._paint(f"{indent}saved {save['name']}={shown}", Style.DIM))
+
+    def _save_value(self, save, response):
+        self._commit_saves([save], response)
 
     def _oauth_token(self, spec, force_refresh=False):
         token_url = self._interp(spec.get("token_url"))
