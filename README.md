@@ -259,7 +259,7 @@ HTTP `OPTIONS` is written as `REQUEST: OPTIONS /path` so it does not collide wit
 
 `AUTH: oauth2 grant=client_credentials token_url=... client_id=...` and `grant=password username=... password=...` fetch a token (cached). If the token response includes `refresh_token`, a 401 retries once after refresh.
 
-`AUTH: oauth2 grant=authorization_code token_url=... auth_url=... client_id=... redirect_uri=... code=${AUTH_CODE} pkce=true` exchanges an authorization code. SnapAPI does not open a browser; supply `${AUTH_CODE}` from the environment. With `pkce=true` the token request includes S256 `code_verifier` / `code_challenge` fields.
+`AUTH: oauth2 grant=authorization_code token_url=... client_id=... redirect_uri=... code=${AUTH_CODE} pkce=true code_verifier=${PKCE_VERIFIER}` exchanges an authorization code. SnapAPI does not open a browser or perform the authorize redirect; supply `${AUTH_CODE}` and, for PKCE, the **same** `${PKCE_VERIFIER}` you used when deriving `code_challenge` for the authorization request. With `pkce=true` the token request sends only `code_verifier` (RFC 7636) — never a freshly generated challenge.
 
 `AUTH: digest user:pass` uses `requests` HTTP Digest Auth.
 
@@ -284,21 +284,48 @@ EXPECT: status != 500
 EXPECT: status == 200 RETRY 5 ON 5xx BACKOFF 1s
 EXPECT: body contains userId
 EXPECT: body not contains stack
+EXPECT: body matches "userId":
+EXPECT: body not matches stack.?trace
+EXPECT: body empty
+EXPECT: body not empty
+EXPECT: body starts-with {"ok"
+EXPECT: body ends-with }
+EXPECT: json $.email == "jane@example.com"
+EXPECT: json $.count != 0
+EXPECT: json $.count > 0
 EXPECT: json $.email matches ^.+@example\\.com$
 EXPECT: json $.email not matches @tempmail
+EXPECT: json $.email equals-ignoring-case "Jane@Example.com"
+EXPECT: json $.email contains-ignoring-case "@example"
 EXPECT: json $.items length == 3
 EXPECT: json $.items empty
 EXPECT: json $.items not empty
+EXPECT: json $.password absent
+EXPECT: json $.id exists
+EXPECT: json $.id present
+EXPECT: json $.secret not exists
 EXPECT: json $.id type string
 EXPECT: json $.status in ["open","pending"]
+EXPECT: json $.status not in ["error","failed"]
 EXPECT: json $.email starts-with "ada@"
 EXPECT: json $.email ends-with "@example.com"
+EXPECT: json $.tags contains "a"
+EXPECT: json $.tags not contains "z"
 EXPECT: json $.tags contains-all ["a","b"]
 EXPECT: json $.tags contains-only ["a","b"]
 EXPECT: json $.tags contains-any ["admin","owner"]
+EXPECT: json $.events contains-sequence ["created","paid"]
+EXPECT: json $.roles subset-of ["admin","editor","viewer"]
+EXPECT: json $ contains-keys ["id","email"]
+EXPECT: json $ not contains-keys ["password"]
 EXPECT: json $.ids unique
+EXPECT: json $.ids sorted
+EXPECT: json $.ids sorted desc
 EXPECT: json $.count between 1 10
 EXPECT: json $.score close-to 0.33 delta 0.01
+EXPECT: json $.count positive
+EXPECT: json $.balance zero
+EXPECT: json $.debt negative
 EXPECT: json $.items[*].id contains 3
 EXPECT: json $.items[?(@.status=="open")].id contains 3
 EXPECT: json $.items each $.status == "active"
@@ -307,15 +334,31 @@ EXPECT: status == 400 OR status == 401
 EXPECT: json $.success == false AND body contains error
 EXPECT: (status == 400 OR status == 401) AND json $.success == false
 EXPECT: schema ./schemas/user.json
+EXPECT: schema inline {"type":"object"}
 EXPECT: duration < 200ms
+EXPECT: header Content-Type == application/json
+EXPECT: header Content-Type != text/html
 EXPECT: header Content-Type contains json
+EXPECT: header Content-Type not contains html
+EXPECT: header Content-Type matches json
 EXPECT: header Content-Type starts-with application
-EXPECT: body empty
-EXPECT: body starts-with {"ok"
+EXPECT: header Content-Type ends-with json
+EXPECT: header Content-Type equals-ignoring-case APPLICATION/JSON
+EXPECT: header Content-Type contains-ignoring-case json
+EXPECT: header X-Env in ["stage","prod"]
+EXPECT: header X-Env not in ["dev"]
+EXPECT: header X-Empty empty
+EXPECT: header Authorization not empty
+EXPECT: header X-Debug absent
+EXPECT: header Authorization exists
+EXPECT: header Authorization present
+EXPECT: header Set-Cookie not contains session
 EXPECT: openapi ./openapi.yaml
 EXPECT: openapi ./openapi.yaml strict
 EXPECT: xpath //Order/@id == "1"
 ```
+
+Catalog (every operator): [DSL → Expect](https://deekshith-poojary98.github.io/snapapi/guide/dsl.html#expect).
 
 Also accepted:
 

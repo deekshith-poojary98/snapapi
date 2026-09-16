@@ -134,10 +134,14 @@ snapapi watch tests/ --tag users</code></pre>
       <p>Re-runs when <code>.sapi</code> or <code>.snaptest</code> files change (poll). Install <code>pip install -e ".[watch]"</code> for a <code>watchdog</code> observer. All run flags are accepted.</p>
 
       <h2>Listeners</h2>
-      <p>A listener is a Python class (or module) with optional methods. SnapAPI calls the ones you implement. Listener exceptions are warnings; they do not change the suite result.</p>
+      <p>A listener is a Python class (or module) with optional methods. SnapAPI calls the ones you implement. Listener exceptions are warnings; they do not change the suite result. Use listeners to push results to a TMS, Slack, or any webhook — SnapAPI stays tool-agnostic.</p>
       <pre><code class="language-bash">snapapi tests/ --listener reporters/jira.py:JiraReporter
-snapapi tests/ --listener examples/print_listener.py:PrintListener --report html:report.html</code></pre>
-      <pre><code class="language-python">class JiraReporter:
+snapapi tests/ --listener examples/print_listener.py:PrintListener --report html:report.html
+export SNAPAPI_WEBHOOK_URL=https://example.com/hooks/snapapi
+snapapi tests/ --listener examples/webhook_listener.py:WebhookListener</code></pre>
+      <h3>Contract</h3>
+      <p>Implement only the hooks you need. Arguments:</p>
+      <pre><code class="language-python">class Reporter:
     def start_suite(self, suite):
         ...  # suite["name"], suite["source"]
 
@@ -145,17 +149,21 @@ snapapi tests/ --listener examples/print_listener.py:PrintListener --report html
         ...
 
     def end_test(self, suite, test):
-        ...  # test.name, test.status, test.error, test.tags, test.requests
+        ...  # TestResult: name, status (passed|failed|skipped),
+             # tags, duration_ms, error, requests
+             # test.to_dict() → JSON-safe (redacted bodies/headers)
 
     def end_suite(self, result):
-        ...  # result.to_dict()
+        ...  # SuiteResult: name, source, ok, passed, failed, skipped
+             # result.to_dict()
 
     def report_written(self, kind, path):
         ...  # kind is html, json, or junit
 
     def close(self):
         ...</code></pre>
-      <p>From Python, pass instances to <code>run_suites(..., listeners=[JiraReporter()], close_listeners=True)</code>. The CLI writes reports, then calls <code>report_written</code>, then <code>close</code>.</p>
+      <p>From Python, pass instances to <code>run_suites(..., listeners=[Reporter()], close_listeners=True)</code>. The CLI writes reports, then calls <code>report_written</code>, then <code>close</code>.</p>
+      <p>See <code>examples/print_listener.py</code> (stdout) and <code>examples/webhook_listener.py</code> (POST JSON to <code>SNAPAPI_WEBHOOK_URL</code>). Map fields on the receiving side for Qase, Jira, Slack, or an internal collector.</p>
       <p>Listeners wrap the run. They don’t compute a header on this POST. That’s <a href="plugins.html"><code>CALL</code></a>.</p>
 
       <h2>From Python</h2>

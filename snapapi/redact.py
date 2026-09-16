@@ -13,9 +13,11 @@ SENSITIVE_HEADERS = {
     "proxy-authorization",
 }
 BEARER_RE = re.compile(r"(?i)\b(bearer)\s+\S+")
-TOKENISH_RE = re.compile(r"(?i)(token|secret|password|passwd|api[_-]?key)\s*[:=]\s*\S+")
+TOKENISH_RE = re.compile(
+    r"(?i)(token|secret|password|passwd|api[_-]?key|code_verifier)\s*[:=]\s*\S+"
+)
 SENSITIVE_NAME_RE = re.compile(
-    r"(?i)(token|secret|password|passwd|authorization|cookie|jwt|api[_-]?key)"
+    r"(?i)(token|secret|password|passwd|authorization|cookie|jwt|api[_-]?key|verifier)"
 )
 JWT_RE = re.compile(r"^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$")
 
@@ -30,8 +32,20 @@ def redact_value(value):
     if not isinstance(value, str):
         return value
     text = BEARER_RE.sub(r"\1 " + REDACTED, value)
-    text = TOKENISH_RE.sub(lambda match: match.group(0).split()[0] + " " + REDACTED, text)
+    text = TOKENISH_RE.sub(_redact_tokenish_match, text)
     return text
+
+
+def _redact_tokenish_match(match):
+    text = match.group(0)
+    if "=" in text:
+        key, _, _rest = text.partition("=")
+        return f"{key}={REDACTED}"
+    if ":" in text:
+        key, _, _rest = text.partition(":")
+        return f"{key}:{REDACTED}" if not _rest.startswith(" ") else f"{key}: {REDACTED}"
+    parts = text.split(None, 1)
+    return parts[0] + " " + REDACTED
 
 
 def redact_saved(name, value):
@@ -68,6 +82,7 @@ def redact_body(body, limit=2000):
     else:
         text = str(body)
     text = BEARER_RE.sub(r"\1 " + REDACTED, text)
+    text = TOKENISH_RE.sub(_redact_tokenish_match, text)
     if len(text) > limit:
         return text[:limit] + f"... ({len(text)} bytes)"
     return text

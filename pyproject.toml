@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pysnapapi"
-version = "0.4.0"
+dynamic = ["version"]
 description = "Lightweight DSL for HTTP API testing"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -45,6 +45,9 @@ Issues = "https://github.com/deekshith-poojary98/snapapi/issues"
 
 [tool.setuptools.packages.find]
 include = ["snapapi"]
+
+[tool.setuptools.dynamic]
+version = {attr = "snapapi.version.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

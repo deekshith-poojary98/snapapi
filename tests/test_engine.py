@@ -1,7 +1,13 @@
+import io
+from types import SimpleNamespace
+
 import pytest
 
+import requests
+
+from snapapi.engine import Engine
 from snapapi.exceptions import SnapAPIError
-from tests.helpers import parse_dsl, run_dsl
+from tests.helpers import parse_dsl, run_dsl, stub_dns_rebinding, stub_public_host_http
 
 
 def _suite(server, body):
@@ -10,6 +16,18 @@ SUITE: Local
 URL: {server.base_url}
 {body}
 """
+
+
+def _assert_each_upload_contains(http_server, *payloads):
+    assert http_server.requests, "expected uploaded requests"
+    for index, request in enumerate(http_server.requests, start=1):
+        raw = request.get("raw") or b""
+        body = request.get("body") or ""
+        assert raw, f"attempt {index} sent an empty body"
+        for payload in payloads:
+            assert payload in raw, (
+                f"attempt {index} did not upload complete file bytes {payload!r}; raw={raw!r} body={body!r}"
+            )
 
 
 def test_get_status_pass(http_server):
@@ -258,6 +276,187 @@ TEST: Profile
     assert "2 skipped" in output
     assert "SUITE-SETUP (Authenticate)" in output
     assert [item["path"] for item in http_server.requests] == ["/login"]
+
+
+def test_suite_teardown_failure_fails_suite(http_server):
+    http_server.on("GET", "/ok", json={"ok": True})
+    http_server.on("POST", "/cleanup", status=500, json={"ok": False})
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-TEARDOWN: Cleanup
+TEST: Ok
+  GET: /ok
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert result.passed == 1
+    assert result.failed == 0
+    assert not result.ok
+    assert result.error_name == "SUITE-TEARDOWN (Cleanup)"
+    assert "Status code expected 200, got 500" in (result.error or "")
+    assert [item["path"] for item in http_server.requests] == ["/ok", "/cleanup"]
+    assert "SUITE-TEARDOWN (Cleanup)" in output
+
+
+def test_suite_teardown_runs_after_failed_test(http_server):
+    http_server.on("GET", "/boom", status=500, json={})
+    http_server.on("POST", "/cleanup", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-TEARDOWN: Cleanup
+TEST: Boom
+  GET: /boom
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.failed == 1
+    assert result.error is None
+    assert [item["path"] for item in http_server.requests] == ["/boom", "/cleanup"]
+
+
+def test_suite_teardown_failure_with_failed_test_still_reported(http_server):
+    http_server.on("GET", "/boom", status=500, json={})
+    http_server.on("POST", "/cleanup", status=500, json={})
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-TEARDOWN: Cleanup
+TEST: Boom
+  GET: /boom
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.failed == 1
+    assert result.error_name == "SUITE-TEARDOWN (Cleanup)"
+    assert "SUITE-TEARDOWN (Cleanup)" in output
+    assert [item["path"] for item in http_server.requests] == ["/boom", "/cleanup"]
+
+
+def test_suite_teardown_runs_after_suite_setup_failure(http_server):
+    http_server.on("POST", "/login", status=401, json={})
+    http_server.on("POST", "/cleanup", json={"ok": True})
+    http_server.on("GET", "/me", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Authenticate
+  POST: /login
+  EXPECT: status == 200
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-SETUP: Authenticate
+SUITE-TEARDOWN: Cleanup
+TEST: Me
+  GET: /me
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.error_name == "SUITE-SETUP (Authenticate)"
+    assert result.skipped == 1
+    assert [item["path"] for item in http_server.requests] == ["/login", "/cleanup"]
+
+
+def test_suite_setup_and_teardown_both_fail_reports_both(http_server):
+    http_server.on("POST", "/login", status=401, json={})
+    http_server.on("POST", "/cleanup", status=500, json={})
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Authenticate
+  POST: /login
+  EXPECT: status == 200
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-SETUP: Authenticate
+SUITE-TEARDOWN: Cleanup
+TEST: Me
+  GET: /me
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.error_name == "SUITE-SETUP (Authenticate)"
+    assert "SUITE-TEARDOWN (Cleanup) also failed" in (result.error or "")
+    assert [item["path"] for item in http_server.requests] == ["/login", "/cleanup"]
+    assert "SUITE-SETUP (Authenticate)" in output
+
+
+def test_suite_teardown_multi_step_failure_fails_suite(http_server):
+    http_server.on("GET", "/ok", json={"ok": True})
+    http_server.on("POST", "/cleanup/1", json={"ok": True})
+    http_server.on("POST", "/cleanup/2", status=500, json={})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Cleanup
+  POST: /cleanup/1
+  EXPECT: status == 200
+  POST: /cleanup/2
+  EXPECT: status == 200
+SUITE-TEARDOWN: Cleanup
+TEST: Ok
+  GET: /ok
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.error_name == "SUITE-TEARDOWN (Cleanup)"
+    assert [item["path"] for item in http_server.requests] == ["/ok", "/cleanup/1", "/cleanup/2"]
+
+
+def test_suite_setup_teardown_happy_path(http_server):
+    http_server.on("POST", "/login", json={"token": "t"})
+    http_server.on("GET", "/me", json={"ok": True})
+    http_server.on("POST", "/cleanup", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Authenticate
+  POST: /login
+  EXPECT: status == 200
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-SETUP: Authenticate
+SUITE-TEARDOWN: Cleanup
+TEST: Me
+  GET: /me
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert result.ok
+    assert result.error is None
+    assert [item["path"] for item in http_server.requests] == ["/login", "/me", "/cleanup"]
 
 
 def test_depends_skips_when_upstream_fails(http_server):
@@ -624,6 +823,74 @@ TEST: Flaky
     assert len(http_server.requests) == 3
 
 
+def test_retry_file_upload_sends_complete_body_each_attempt(http_server, tmp_path):
+    payload = b"BUG003-PHOTO-PAYLOAD-COMPLETE"
+    photo = tmp_path / "photo.bin"
+    photo.write_bytes(payload)
+    http_server.on("POST", "/upload", json={"ok": True}, fail_times=1)
+    result, _, _ = run_dsl(_suite(http_server, f"""
+TEST: Upload
+  POST: /upload
+  FILE: avatar FROM {photo}
+  EXPECT: status == 200 RETRY 3 ON 5xx BACKOFF 0s
+"""))
+    assert result.ok
+    assert len(http_server.requests) == 2
+    _assert_each_upload_contains(http_server, payload)
+    assert "multipart" in http_server.requests[0]["headers"].get("Content-Type", "")
+    assert "multipart" in http_server.requests[1]["headers"].get("Content-Type", "")
+
+
+def test_wait_file_upload_sends_complete_body_each_attempt(http_server, tmp_path):
+    payload = b"BUG003-WAIT-PHOTO-PAYLOAD-COMPLETE"
+    photo = tmp_path / "photo.bin"
+    photo.write_bytes(payload)
+    state = {"n": 0}
+
+    def handler(record):
+        state["n"] += 1
+        if state["n"] < 2:
+            return 200, {"Content-Type": "application/json"}, {"status": "pending"}
+        return 200, {"Content-Type": "application/json"}, {"status": "ready"}
+
+    http_server.on("POST", "/upload", handler=handler)
+    result, _, _ = run_dsl(_suite(http_server, f"""
+TEST: Poll upload
+  POST: /upload
+  FILE: avatar FROM {photo}
+  WAIT: json $.status == "ready" TIMEOUT 2s BACKOFF 0s
+  EXPECT: status == 200
+"""))
+    assert result.ok
+    assert state["n"] == 2
+    assert len(http_server.requests) == 2
+    _assert_each_upload_contains(http_server, payload)
+
+
+def test_retry_multiple_file_uploads_send_complete_bodies_each_attempt(http_server, tmp_path):
+    photo_bytes = b"BUG003-MULTI-PHOTO-PAYLOAD-COMPLETE"
+    banner_bytes = b"BUG003-MULTI-BANNER-PAYLOAD-COMPLETE"
+    photo = tmp_path / "photo.bin"
+    banner = tmp_path / "banner.bin"
+    photo.write_bytes(photo_bytes)
+    banner.write_bytes(banner_bytes)
+    http_server.on("POST", "/upload", json={"ok": True}, fail_times=1)
+    result, _, _ = run_dsl(_suite(http_server, f"""
+TEST: Upload both
+  POST: /upload
+  FILE: avatar FROM {photo}
+  FILE: banner FROM {banner}
+  EXPECT: status == 200 RETRY 3 ON 5xx BACKOFF 0s
+"""))
+    assert result.ok
+    assert len(http_server.requests) == 2
+    _assert_each_upload_contains(http_server, photo_bytes, banner_bytes)
+    for request in http_server.requests:
+        body = request["body"]
+        assert "photo.bin" in body
+        assert "banner.bin" in body
+
+
 def test_duration_printed(http_server):
     http_server.on("GET", "/ping", json={"ok": True})
     result, _, output = run_dsl(_suite(http_server, """
@@ -924,9 +1191,296 @@ TEST: Ops
   EXPECT: json $.count between 1 10
   EXPECT: json $.score close-to 0.33 delta 0.01
   EXPECT: json $.email not matches @tempmail
+  EXPECT: json $.password absent
+  EXPECT: json $.id exists
+  EXPECT: json $.missing exists
+  EXPECT: json $.nope not exists
   EXPECT: header Content-Type starts-with application
   EXPECT: header X-Status in ["open","pending"]
+  EXPECT: header X-Debug absent
+  EXPECT: header Content-Type exists
+  EXPECT: header Content-Type not contains xml
   EXPECT: body not empty
+"""))
+    assert result.ok
+
+
+def test_expect_collection_and_key_operators(http_server):
+    http_server.on(
+        "GET",
+        "/payload",
+        json={
+            "status": "open",
+            "events": ["created", "paid", "shipped"],
+            "roles": ["editor", "viewer"],
+            "ids": [1, 2, 3],
+            "desc_ids": [3, 2, 1],
+            "user": {"id": 1, "email": "Ada@Example.com", "name": "Ada"},
+            "count": 5,
+            "balance": 0,
+            "debt": -2,
+            "tags": ["a", "b"],
+        },
+        headers={"Content-Type": "Application/JSON", "X-Env": "Stage"},
+    )
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Collections
+  GET: /payload
+  EXPECT: json $.status not in ["error","failed"]
+  EXPECT: json $.events contains-sequence ["created","paid"]
+  EXPECT: json $.roles subset-of ["admin","editor","viewer"]
+  EXPECT: json $.ids sorted
+  EXPECT: json $.desc_ids sorted desc
+  EXPECT: json $.user contains-keys ["id","email"]
+  EXPECT: json $.user not contains-keys ["password","ssn"]
+  EXPECT: json $.tags not contains "z"
+  EXPECT: json $.user.email equals-ignoring-case "ada@example.com"
+  EXPECT: json $.count positive
+  EXPECT: json $.balance zero
+  EXPECT: json $.debt negative
+  EXPECT: header Content-Type contains-ignoring-case json
+  EXPECT: header X-Env equals-ignoring-case stage
+"""))
+    assert result.ok
+
+
+def test_expect_collection_operators_fail(http_server):
+    http_server.on(
+        "GET",
+        "/payload",
+        json={
+            "status": "error",
+            "events": ["created", "shipped"],
+            "roles": ["root"],
+            "ids": [3, 1, 2],
+            "user": {"id": 1, "password": "x"},
+        },
+    )
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Failures
+  GET: /payload
+  EXPECT: json $.status not in ["error"]
+  EXPECT: json $.events contains-sequence ["created","paid"]
+  EXPECT: json $.roles subset-of ["admin","editor"]
+  EXPECT: json $.ids sorted
+  EXPECT: json $.user contains-keys ["email"]
+  EXPECT: json $.user not contains-keys ["password"]
+"""))
+    assert not result.ok
+    error = result.tests[0].error or ""
+    assert "unexpectedly in" in error
+    assert "does not contain sequence" in error
+    assert "not a subset" in error
+    assert "expected ascending sort" in error
+    assert "missing keys" in error
+    assert "unexpectedly has keys" in error
+    http_server.on("GET", "/user", json={"password": "secret"})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Leak
+  GET: /user
+  EXPECT: json $.password absent
+"""))
+    assert not result.ok
+    assert "should be absent" in (result.tests[0].error or "")
+
+
+def test_expect_exists_fails_when_path_missing(http_server):
+    http_server.on("GET", "/user", json={"id": 1})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Missing
+  GET: /user
+  EXPECT: json $.email exists
+"""))
+    assert not result.ok
+    assert "should exist" in (result.tests[0].error or "")
+
+
+def test_json_equality_uses_json_types_not_python(http_server):
+    """JSON == / != match playground JS === (bool ≠ number; 1 == 1.0)."""
+    http_server.on(
+        "GET",
+        "/types",
+        json={
+            "ok": True,
+            "off": False,
+            "count": 1,
+            "ratio": 1.0,
+            "nested": {"enabled": True},
+            "flags": [True],
+        },
+    )
+    for label, expect in [
+        ("bool-as-one", "EXPECT: json $.ok == 1"),
+        ("false-as-zero", "EXPECT: json $.off == 0"),
+        ("nested", 'EXPECT: json $.nested == {"enabled": 1}'),
+        ("array", "EXPECT: json $.flags == [1]"),
+    ]:
+        result, _, _ = run_dsl(
+            _suite(
+                http_server,
+                f"""
+TEST: {label}
+  GET: /types
+  {expect}
+""",
+            )
+        )
+        assert not result.ok, label
+        assert "expected" in (result.tests[0].error or ""), label
+
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+TEST: Ok
+  GET: /types
+  EXPECT: json $.ok == true
+  EXPECT: json $.ok != 1
+  EXPECT: json $.off == false
+  EXPECT: json $.off != 0
+  EXPECT: json $.count == 1
+  EXPECT: json $.count == 1.0
+  EXPECT: json $.ratio == 1
+  EXPECT: json $.nested == {"enabled": true}
+  EXPECT: json $.nested != {"enabled": 1}
+  EXPECT: json $.flags == [true]
+  EXPECT: json $.flags != [1]
+""",
+        )
+    )
+    assert result.ok, result.tests[0].error
+
+
+def test_json_equal_unit():
+    from snapapi.engine import _json_equal
+
+    assert _json_equal(True, True)
+    assert not _json_equal(True, 1)
+    assert not _json_equal(False, 0)
+    assert _json_equal(1, 1.0)
+    assert _json_equal({"enabled": True}, {"enabled": True})
+    assert not _json_equal({"enabled": True}, {"enabled": 1})
+    assert _json_equal([True], [True])
+    assert not _json_equal([True], [1])
+    assert _json_equal(None, None)
+    assert not _json_equal(None, False)
+
+
+def test_package_version_is_single_source():
+    from snapapi import __version__
+    from snapapi.engine import SNAPAPI_VERSION, _as_har
+    from snapapi.version import __version__ as source
+
+    assert __version__ == source == "0.5.0"
+    assert SNAPAPI_VERSION == source
+    har = _as_har(
+        SimpleNamespace(
+            method="GET",
+            url="http://example.com",
+            status_code=200,
+            request_headers={},
+            response_headers={},
+            response_body="{}",
+            duration_ms=1,
+        )
+    )
+    assert har["log"]["creator"]["version"] == source
+
+
+def test_expect_absent_exists_wildcard_semantics(http_server):
+    """exists = at least one match; absent = zero matches (null still present)."""
+    cases = [
+        (
+            "empty-list",
+            {"items": []},
+            """
+  EXPECT: json $.items[*].password absent
+  EXPECT: json $.items[*].password exists
+""",
+            False,
+            "should exist",
+        ),
+        (
+            "no-password",
+            {"items": [{"id": 1}]},
+            """
+  EXPECT: json $.items[*].password absent
+""",
+            True,
+            None,
+        ),
+        (
+            "all-have-password",
+            {"items": [{"id": 1, "password": "x"}]},
+            """
+  EXPECT: json $.items[*].password exists
+  EXPECT: json $.items[*].password absent
+""",
+            False,
+            "should be absent",
+        ),
+        (
+            "mixed-must-not-absent",
+            {"items": [{"id": 1}, {"id": 2, "password": "x"}]},
+            """
+  EXPECT: json $.items[*].password absent
+""",
+            False,
+            "should be absent",
+        ),
+        (
+            "mixed-exists-passes",
+            {"items": [{"id": 1}, {"id": 2, "password": "x"}]},
+            """
+  EXPECT: json $.items[*].password exists
+""",
+            True,
+            None,
+        ),
+        (
+            "null-password-is-present",
+            {"items": [{"id": 1, "password": None}]},
+            """
+  EXPECT: json $.items[*].password exists
+  EXPECT: json $.items[*].password absent
+""",
+            False,
+            "should be absent",
+        ),
+        (
+            "scalar-null-present",
+            {"password": None},
+            """
+  EXPECT: json $.password exists
+""",
+            True,
+            None,
+        ),
+    ]
+    for name, payload, expects, ok, error_snip in cases:
+        http_server.on("GET", f"/{name}", json=payload)
+        result, _, _ = run_dsl(
+            _suite(
+                http_server,
+                f"""
+TEST: {name}
+  GET: /{name}
+{expects}
+""",
+            )
+        )
+        assert result.ok is ok, f"{name}: ok={result.ok} error={result.tests[0].error!r}"
+        if error_snip:
+            assert error_snip in (result.tests[0].error or ""), name
+
+
+def test_expect_header_absent(http_server):
+    http_server.on("GET", "/ok", json={"ok": True}, headers={"Content-Type": "application/json"})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Headers
+  GET: /ok
+  EXPECT: header X-Debug absent
+  EXPECT: header Content-Type present
 """))
     assert result.ok
 
@@ -989,3 +1543,345 @@ TEST: Hello
   EXPECT: body not matches stack
 """))
     assert result.ok
+
+
+def test_wait_attempt_cap_fails_test_not_runner(monkeypatch):
+    suite = parse_dsl("""
+SUITE: Local
+URL: http://example.test
+TEST: Poll
+  GET: /job
+  WAIT: json $.status == "ready" TIMEOUT 3600s BACKOFF 0s
+""")
+    stream = io.StringIO()
+    engine = Engine(suite, stream=stream, retry_backoff=0)
+    pending = SimpleNamespace(
+        status_code=200,
+        url="http://example.test/job",
+        headers={"Content-Type": "application/json"},
+        text='{"status": "pending"}',
+        json=lambda: {"status": "pending"},
+    )
+    monkeypatch.setattr(engine, "_dispatch", lambda *args, **kwargs: pending)
+    monkeypatch.setattr("snapapi.engine.time.sleep", lambda _seconds: None)
+    result = engine.run()
+    assert result.ok is False
+    assert result.failed == 1
+    assert result.tests[0].status == "failed"
+    assert result.tests[0].error
+
+
+def test_invalid_matches_regex_fails_test_not_runner(http_server):
+    http_server.on("GET", "/user", json={"email": "ada@example.com"})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Regex
+  GET: /user
+  EXPECT: json $.email matches [
+"""))
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = (result.tests[0].error or "").lower()
+    assert "regex" in error or "pattern" in error
+
+
+def test_json_length_on_null_fails_test_not_runner(http_server):
+    http_server.on("GET", "/user", json={"email": None})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Null length
+  GET: /user
+  EXPECT: json $.email length == 0
+"""))
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = (result.tests[0].error or "").lower()
+    assert "length" in error
+    assert "null" in error
+
+
+def test_json_length_on_number_fails_test_not_runner(http_server):
+    http_server.on("GET", "/user", json={"id": 1})
+    result, _, _ = run_dsl(_suite(http_server, """
+TEST: Number length
+  GET: /user
+  EXPECT: json $.id length == 1
+"""))
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = (result.tests[0].error or "").lower()
+    assert "length" in error
+    assert "number" in error or "int" in error
+
+
+def test_safe_url_blocks_oauth_loopback_token_url(http_server):
+    http_server.on("POST", "/oauth/token", json={"access_token": "should-not-issue"})
+    http_server.on("GET", "/public", json={"ok": True})
+    result, _, _ = run_dsl(
+        f"""
+SUITE: Safe
+URL: http://example.com
+TEST: Token
+  GET: /public
+  AUTH: oauth2 token_url={http_server.base_url}/oauth/token client_id=id client_secret=s
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = result.tests[0].error or ""
+    assert "Blocked" in error
+    assert "127.0.0.1" in error
+    assert http_server.requests == []
+
+
+def test_safe_url_blocks_oauth_private_token_url(monkeypatch, http_server):
+    http_server.on("POST", "/oauth/token", json={"access_token": "should-not-issue"})
+
+    def fail_send(*args, **kwargs):
+        raise AssertionError("HTTP send must not run for a private OAuth token URL")
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", fail_send)
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: Token
+  GET: /public
+  AUTH: oauth2 token_url=http://10.0.0.1:9/oauth/token client_id=id client_secret=s
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = result.tests[0].error or ""
+    assert "Blocked" in error
+    assert "10.0.0.1" in error
+    assert http_server.requests == []
+
+
+def test_oauth_loopback_token_url_still_works_without_safe_url(http_server):
+    http_server.on("POST", "/oauth/token", json={"access_token": "tok-ok"})
+    http_server.on("GET", "/secure", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            f"""
+TEST: Token
+  GET: /secure
+  AUTH: oauth2 token_url={http_server.base_url}/oauth/token client_id=id client_secret=s
+  EXPECT: status == 200
+""",
+        ),
+        safe_url=False,
+        timeout=2,
+    )
+    assert result.ok
+    assert [item["path"] for item in http_server.requests] == ["/oauth/token", "/secure"]
+    assert http_server.requests[1]["headers"].get("Authorization") == "Bearer tok-ok"
+
+
+def test_safe_url_blocks_redirect_to_loopback(http_server, monkeypatch):
+    http_server.on("GET", "/secret", json={"pwned": True})
+    sent = stub_public_host_http(
+        monkeypatch,
+        {"/start": (302, {"Location": f"{http_server.base_url}/secret"}, b"")},
+    )
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: Redir
+  GET: /start
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = result.tests[0].error or ""
+    assert "Blocked" in error
+    assert "127.0.0.1" in error
+    assert http_server.requests == []
+    assert sent == ["http://example.com/start"]
+    assert all("127.0.0.1" not in url for url in sent)
+
+
+def test_safe_url_blocks_oauth_token_redirect_to_loopback(http_server, monkeypatch):
+    http_server.on("POST", "/oauth/token", json={"access_token": "leaked"})
+    http_server.on("GET", "/oauth/token", json={"access_token": "leaked"})
+    sent = stub_public_host_http(
+        monkeypatch,
+        {"/token": (302, {"Location": f"{http_server.base_url}/oauth/token"}, b"")},
+    )
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: TokenRedir
+  GET: /public
+  AUTH: oauth2 token_url=http://example.com/token client_id=id client_secret=s
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    error = result.tests[0].error or ""
+    assert "Blocked" in error
+    assert "127.0.0.1" in error
+    assert http_server.requests == []
+    assert sent == ["http://example.com/token"]
+    assert all("127.0.0.1" not in url for url in sent)
+
+
+def test_safe_url_allows_redirect_between_public_urls(monkeypatch):
+    stub_public_host_http(
+        monkeypatch,
+        {
+            "/from": (302, {"Location": "http://example.com/to"}, b""),
+            "/to": (200, {"Content-Type": "application/json"}, b'{"ok": true}'),
+        },
+    )
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: Redir
+  GET: /from
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert result.ok
+    assert result.tests[0].status == "passed"
+
+
+def test_safe_url_still_blocks_metadata_host():
+    result, _, _ = run_dsl(
+        """
+SUITE: Unsafe
+URL: http://169.254.169.254
+TEST: Meta
+  GET: /latest
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    assert "Blocked" in (result.tests[0].error or "")
+
+
+def test_safe_url_blocks_dns_rebinding_engine(http_server, monkeypatch):
+    http_server.on("GET", "/secret", json={"pwned": True})
+    host = "rebinder.test"
+    stub_dns_rebinding(monkeypatch, host, connect_ip="127.0.0.1")
+    result, _, _ = run_dsl(
+        f"""
+SUITE: Safe
+URL: http://{host}:{http_server.port}
+TEST: Rebind
+  GET: /secret
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    assert "Blocked" in (result.tests[0].error or "")
+    assert http_server.requests == []
+
+
+def test_safe_url_blocks_oauth_dns_rebinding_secret(http_server, monkeypatch):
+    http_server.on("POST", "/oauth/token", json={"access_token": "leaked"})
+    host = "rebinder.test"
+    stub_dns_rebinding(monkeypatch, host, connect_ip="127.0.0.1")
+    result, _, _ = run_dsl(
+        f"""
+SUITE: Safe
+URL: http://example.com
+TEST: Token
+  GET: /public
+  AUTH: oauth2 token_url=http://{host}:{http_server.port}/oauth/token client_id=id client_secret=SUPERSECRET
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    assert "Blocked" in (result.tests[0].error or "")
+    assert http_server.requests == []
+    assert all("SUPERSECRET" not in (item.get("body") or "") for item in http_server.requests)
+
+
+def test_safe_url_blocks_env_http_proxy_engine(http_server, monkeypatch):
+    http_server.on("GET", "/start", json={"via-proxy": True})
+    monkeypatch.setenv("HTTP_PROXY", http_server.base_url)
+    monkeypatch.setenv("http_proxy", http_server.base_url)
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    stub_public_host_http(monkeypatch, {"/start": (200, {"Content-Type": "application/json"}, b'{"ok": true}')})
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: Direct
+  GET: /start
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert result.ok
+    assert http_server.requests == [], "env HTTP_PROXY must not receive traffic under safe_url"
+
+
+def test_safe_url_blocks_explicit_loopback_proxy_engine(http_server):
+    http_server.on("GET", "/start", json={"via-proxy": True})
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://example.com
+TEST: Proxied
+  GET: /start
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+        proxies={"http": http_server.base_url, "https": http_server.base_url},
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    assert "Blocked" in (result.tests[0].error or "")
+    assert http_server.requests == []
+
+
+def test_safe_url_blocks_cgnat_engine(monkeypatch):
+    def fail_send(*args, **kwargs):
+        raise AssertionError("HTTP send must not run for CGNAT destinations")
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, "send", fail_send)
+    result, _, _ = run_dsl(
+        """
+SUITE: Safe
+URL: http://100.100.100.200
+TEST: Cgnat
+  GET: /
+  EXPECT: status == 200
+""",
+        safe_url=True,
+        timeout=2,
+    )
+    assert not result.ok
+    assert result.tests[0].status == "failed"
+    assert "Blocked" in (result.tests[0].error or "")
+

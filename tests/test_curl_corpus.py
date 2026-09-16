@@ -114,6 +114,9 @@ def _assert_semantic(suite, text, semantic):
     if "body" in semantic:
         assert step["data"] == semantic["body"]
 
+    if "raw_body" in semantic:
+        assert step.get("raw_body") == semantic["raw_body"]
+
     if "body_type" in semantic:
         assert step.get("body_type") == semantic["body_type"]
 

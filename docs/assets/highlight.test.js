@@ -57,10 +57,33 @@ function testDetect() {
 }
 
 function testNewExpectOps() {
-  const html = hl.highlightSnaptest('EXPECT: json $.items empty BECAUSE "reason"\nEXPECT: json $.tags contains-only ["a"]');
+  const html = hl.highlightSnaptest(
+    [
+      'EXPECT: json $.items empty BECAUSE "reason"',
+      "EXPECT: json $.password absent",
+      'EXPECT: json $.tags contains-only ["a"]',
+      'EXPECT: json $.events contains-sequence ["a","b"]',
+      'EXPECT: json $.roles subset-of ["a"]',
+      'EXPECT: json $ contains-keys ["id"]',
+      "EXPECT: json $.ids sorted",
+      "EXPECT: json $.n zero",
+      "EXPECT: json $.n positive",
+      "EXPECT: json $.n negative",
+      'EXPECT: json $.name equals-ignoring-case "Ada"',
+    ].join("\n")
+  );
   assert(/class="tok-aux">empty</.test(html), "empty aux:\n" + html);
+  assert(/class="tok-aux">absent</.test(html), "absent aux:\n" + html);
   assert(/class="tok-aux">BECAUSE</.test(html), "BECAUSE aux:\n" + html);
   assert(/contains-only/.test(html), "contains-only:\n" + html);
+  assert(/contains-sequence/.test(html), "contains-sequence:\n" + html);
+  assert(/subset-of/.test(html), "subset-of:\n" + html);
+  assert(/contains-keys/.test(html), "contains-keys:\n" + html);
+  assert(/class="tok-aux">sorted</.test(html), "sorted aux:\n" + html);
+  assert(/class="tok-aux">zero</.test(html), "zero aux:\n" + html);
+  assert(/class="tok-aux">positive</.test(html), "positive aux:\n" + html);
+  assert(/class="tok-aux">negative</.test(html), "negative aux:\n" + html);
+  assert(/equals-ignoring-case/.test(html), "equals-ignoring-case:\n" + html);
 }
 
 testKeywords();

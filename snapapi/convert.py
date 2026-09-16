@@ -144,6 +144,7 @@ class ConvertWarning:
 @dataclass
 class CurlRequest:
     method: str = "GET"
+    method_explicit: bool = False  # True when -X/--request or -I/--head set the method
     url: str = ""
     headers: list[tuple[str, str]] = field(default_factory=list)
     query: list[tuple[str, str]] = field(default_factory=list)
@@ -259,6 +260,7 @@ def parse_curl(command):
             continue
         if token in ("-I", "--head"):
             req.method = "HEAD"
+            req.method_explicit = True
             i += 1
             continue
         if token in ("-L", "--location"):
@@ -358,15 +360,13 @@ def parse_curl(command):
         else:
             req.body = json_body
             req.body_kind = "json"
-        if req.method == "GET":
-            req.method = "POST"
+        _imply_post_unless_explicit(req)
 
     if form_parts:
         has_file = any("=" in part and part.split("=", 1)[1].startswith("@") for part in form_parts)
         req.body_kind = "form"
         req.body = "&".join(form_parts)
-        if req.method == "GET":
-            req.method = "POST"
+        _imply_post_unless_explicit(req)
         req.warnings.append(
             ConvertWarning(
                 "Multipart / form (-F)",
@@ -390,14 +390,15 @@ def parse_curl(command):
             )
             req.body = "${FILE_BODY}"
             req.body_kind = "raw"
+            if not data_as_query:
+                _imply_post_unless_explicit(req)
         elif data_as_query:
             for key, val in parse_qsl(payload, keep_blank_values=True):
                 req.query.append((key, val))
         else:
             req.body = payload
             req.body_kind = _infer_body_kind(payload, req.headers)
-            if req.method == "GET":
-                req.method = "POST"
+            _imply_post_unless_explicit(req)
 
     _extract_auth_from_headers(req)
     _split_url_query(req)
@@ -551,6 +552,7 @@ def _apply_flag(req, flag, value, *, data_parts, form_parts):
     value = value_to_snap_vars(value)
     if flag in ("-X", "--request"):
         req.method = value.upper()
+        req.method_explicit = True
         return
     if flag in ("-H", "--header"):
         name, _, header_value = value.partition(":")
@@ -591,6 +593,12 @@ def _apply_flag(req, flag, value, *, data_parts, form_parts):
             action="Review manually",
         )
     )
+
+
+def _imply_post_unless_explicit(req):
+    """Match curl: -d/--data*/--json/-F imply POST only when -X/-I did not set the method."""
+    if not req.method_explicit and (req.method or "GET").upper() == "GET":
+        req.method = "POST"
 
 
 def _extract_auth_from_headers(req):

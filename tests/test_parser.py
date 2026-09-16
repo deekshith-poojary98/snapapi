@@ -595,6 +595,32 @@ TEST: A
     assert suite["tests"][0]["steps"][0]["headers"]["Authorization"] == "Bearer ${TOKEN}"
 
 
+def test_oauth2_rejects_unused_auth_url():
+    with pytest.raises(ParseError, match="auth_url is not supported"):
+        parse_dsl(
+            """
+SUITE: Demo
+TEST: A
+  GET: /me
+  AUTH: oauth2 grant=authorization_code token_url=http://example.com/token client_id=id code=abc auth_url=http://example.com/auth code_verifier=v pkce=true
+  EXPECT: STATUS 200
+"""
+        )
+
+
+def test_oauth2_rejects_unknown_parameter():
+    with pytest.raises(ParseError, match="unknown parameter"):
+        parse_dsl(
+            """
+SUITE: Demo
+TEST: A
+  GET: /me
+  AUTH: oauth2 token_url=http://example.com/token client_id=id audience=api
+  EXPECT: STATUS 200
+"""
+        )
+
+
 def test_query_and_param_attach_to_request():
     suite = parse_dsl(
         """
@@ -872,6 +898,21 @@ TEST: Checks
   GET: /x
   EXPECT: json $.items empty
   EXPECT: json $.items not empty
+  EXPECT: json $.password absent
+  EXPECT: json $.id exists
+  EXPECT: json $.secret not exists
+  EXPECT: json $.status not in ["error"]
+  EXPECT: json $.events contains-sequence ["a","b"]
+  EXPECT: json $.roles subset-of ["a","b","c"]
+  EXPECT: json $ contains-keys ["id"]
+  EXPECT: json $ not contains-keys ["password"]
+  EXPECT: json $.ids sorted
+  EXPECT: json $.ids sorted desc
+  EXPECT: json $.n zero
+  EXPECT: json $.n positive
+  EXPECT: json $.n negative
+  EXPECT: json $.name equals-ignoring-case "Ada"
+  EXPECT: json $.name contains-ignoring-case "da"
   EXPECT: json $.id type string
   EXPECT: json $.status in ["open","pending"]
   EXPECT: json $.email starts-with "ada@"
@@ -896,34 +937,52 @@ TEST: Checks
     checks = suite["tests"][0]["steps"][0]["checks"]
     assert checks[0]["operator"] == "EMPTY"
     assert checks[1]["operator"] == "NOT EMPTY"
-    assert checks[2]["operator"] == "TYPE"
-    assert checks[2]["value"] == "string"
-    assert checks[3]["operator"] == "IN"
-    assert checks[3]["value"] == ["open", "pending"]
-    assert checks[4]["operator"] == "STARTS-WITH"
-    assert checks[4]["value"] == "ada@"
-    assert checks[5]["operator"] == "ENDS-WITH"
-    assert checks[6]["operator"] == "CONTAINS-ONLY"
-    assert checks[7]["operator"] == "CONTAINS-ANY"
-    assert checks[8]["operator"] == "UNIQUE"
-    assert checks[9]["operator"] == "BETWEEN"
-    assert checks[9]["value"] == [1, 10]
-    assert checks[10]["operator"] == "CLOSE-TO"
-    assert checks[10]["value"] == 0.33
-    assert checks[10]["delta"] == 0.01
-    assert checks[11]["operator"] == "CLOSE-TO"
-    assert checks[11]["delta"] == 0.01
-    assert checks[12]["operator"] == "NOT MATCHES"
-    assert checks[13]["because"] == "login should succeed"
-    assert checks[14]["because"] == "retry me"
-    assert checks[14]["retry"] == 3
-    assert checks[15]["operator"] == "EMPTY"
-    assert checks[16]["operator"] == "STARTS-WITH"
-    assert checks[17]["operator"] == "NOT MATCHES"
-    assert checks[18]["operator"] == "EMPTY"
+    assert checks[2]["operator"] == "ABSENT"
+    assert checks[2]["path"] == "$.password"
+    assert checks[3]["operator"] == "EXISTS"
+    assert checks[3]["path"] == "$.id"
+    assert checks[4]["operator"] == "ABSENT"
+    assert checks[4]["path"] == "$.secret"
+    assert checks[5]["operator"] == "NOT IN"
+    assert checks[6]["operator"] == "CONTAINS-SEQUENCE"
+    assert checks[7]["operator"] == "SUBSET-OF"
+    assert checks[8]["operator"] == "CONTAINS-KEYS"
+    assert checks[9]["operator"] == "NOT CONTAINS-KEYS"
+    assert checks[10]["operator"] == "SORTED"
+    assert checks[11]["operator"] == "SORTED DESC"
+    assert checks[12]["operator"] == "ZERO"
+    assert checks[13]["operator"] == "POSITIVE"
+    assert checks[14]["operator"] == "NEGATIVE"
+    assert checks[15]["operator"] == "EQUALS-IGNORING-CASE"
+    assert checks[16]["operator"] == "CONTAINS-IGNORING-CASE"
+    assert checks[17]["operator"] == "TYPE"
+    assert checks[17]["value"] == "string"
+    assert checks[18]["operator"] == "IN"
+    assert checks[18]["value"] == ["open", "pending"]
     assert checks[19]["operator"] == "STARTS-WITH"
-    assert checks[20]["operator"] == "IN"
-    assert checks[20]["value"] == ["open", "pending"]
+    assert checks[19]["value"] == "ada@"
+    assert checks[20]["operator"] == "ENDS-WITH"
+    assert checks[21]["operator"] == "CONTAINS-ONLY"
+    assert checks[22]["operator"] == "CONTAINS-ANY"
+    assert checks[23]["operator"] == "UNIQUE"
+    assert checks[24]["operator"] == "BETWEEN"
+    assert checks[24]["value"] == [1, 10]
+    assert checks[25]["operator"] == "CLOSE-TO"
+    assert checks[25]["value"] == 0.33
+    assert checks[25]["delta"] == 0.01
+    assert checks[26]["operator"] == "CLOSE-TO"
+    assert checks[26]["delta"] == 0.01
+    assert checks[27]["operator"] == "NOT MATCHES"
+    assert checks[28]["because"] == "login should succeed"
+    assert checks[29]["because"] == "retry me"
+    assert checks[29]["retry"] == 3
+    assert checks[30]["operator"] == "EMPTY"
+    assert checks[31]["operator"] == "STARTS-WITH"
+    assert checks[32]["operator"] == "NOT MATCHES"
+    assert checks[33]["operator"] == "EMPTY"
+    assert checks[34]["operator"] == "STARTS-WITH"
+    assert checks[35]["operator"] == "IN"
+    assert checks[35]["value"] == ["open", "pending"]
 
 
 def test_because_quoted_value_is_not_suffix():

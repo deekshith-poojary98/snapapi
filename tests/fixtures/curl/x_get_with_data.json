@@ -1,0 +1,15 @@
+{
+  "warnings": [],
+  "must_contain": [
+    "GET: /items"
+  ],
+  "must_not_contain": [
+    "POST: /items"
+  ],
+  "semantic": {
+    "method": "GET",
+    "endpoint": "/items",
+    "body": {"q": "1"},
+    "body_type": "form"
+  }
+}

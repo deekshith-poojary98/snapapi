@@ -236,11 +236,15 @@ TEST: T
   EXPECT: json $.ok type boolean
   EXPECT: json $.ok == true BECAUSE "health should pass"
   EXPECT: json $.missing empty
+  EXPECT: json $.password absent
+  EXPECT: json $.ok exists
 `);
   const checks = parsed.tests[0].steps[0].checks;
   assert(checks[0].operator === "TYPE" && checks[0].value === "boolean", "type op");
   assert(checks[1].because === "health should pass", "because on check");
   assert(checks[2].operator === "EMPTY", "empty op");
+  assert(checks[3].operator === "ABSENT", "absent op");
+  assert(checks[4].operator === "EXISTS", "exists op");
 
   const ops = await pg.runText(`
 SUITE: Ops
@@ -250,16 +254,28 @@ TEST: Health
   EXPECT: json $.ok type boolean
   EXPECT: json $.ok in [true]
   EXPECT: json $.ok == true BECAUSE "health should pass"
+  EXPECT: json $.password absent
+  EXPECT: json $.ok exists
+  EXPECT: header X-Debug absent
   EXPECT: body not empty
   EXPECT: header Content-Type starts-with application
 TEST: Users
   GET: /api/users
   EXPECT: json $.page between 1 10
   EXPECT: json $.page type number
+  EXPECT: json $.page positive
   EXPECT: json $.data not empty
   EXPECT: json $.data[*].id unique
   EXPECT: json $.data[*].id contains-any [1, 99]
   EXPECT: json $.data[*].id contains-only [1, 2]
+  EXPECT: json $.data[*].id contains-sequence [1, 2]
+  EXPECT: json $.data[*].id subset-of [1, 2, 99]
+  EXPECT: json $.data[*].id sorted
+  EXPECT: json $ contains-keys ["page","data"]
+  EXPECT: json $ not contains-keys ["password"]
+  EXPECT: json $.data[0].email equals-ignoring-case "GEORGE.BLUTH@REQRES.IN"
+  EXPECT: json $.data[0].email contains-ignoring-case "@reqres"
+  EXPECT: header Content-Type contains-ignoring-case json
 `);
   assert(ops.ok, "new operators should pass\n" + ops.text);
 
@@ -307,6 +323,12 @@ TEST: T
   assert(moreChecks[5].operator === "CONTAINS-ANY", moreChecks[5].operator);
   assert(moreChecks[6].operator === "EMPTY", moreChecks[6].operator);
   assert(moreChecks[7].operator === "MATCHES", moreChecks[7].operator);
+
+  assert(pg.countMatches({ items: [] }, "$.items[*].password") === 0, "empty wildcard");
+  assert(pg.countMatches({ items: [{ id: 1 }] }, "$.items[*].password") === 0, "missing field");
+  assert(pg.countMatches({ items: [{ id: 1 }, { id: 2, password: "x" }] }, "$.items[*].password") === 1, "mixed");
+  assert(pg.countMatches({ items: [{ password: null }] }, "$.items[*].password") === 1, "null present");
+  assert(pg.countMatches({ password: null }, "$.password") === 1, "scalar null");
 }
 
 async function main() {

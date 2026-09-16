@@ -98,6 +98,63 @@ def test_load_listener_class_from_file(tmp_path):
     assert loaded.ok is True
 
 
+def test_webhook_listener_posts_payload():
+    import importlib.util
+    import json as _json
+    from pathlib import Path
+
+    from snapapi.engine import SuiteResult, TestResult
+
+    path = Path(__file__).resolve().parents[1] / "examples" / "webhook_listener.py"
+    spec = importlib.util.spec_from_file_location("webhook_listener_example", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    posts = []
+    original_urlopen = __import__("urllib.request").request.urlopen
+
+    class FakeResp:
+        def read(self):
+            return b""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        posts.append(
+            {
+                "url": req.full_url,
+                "body": _json.loads(req.data.decode("utf-8")),
+                "auth": req.get_header("Authorization"),
+            }
+        )
+        return FakeResp()
+
+    import urllib.request as ureq
+
+    ureq.urlopen = fake_urlopen
+    try:
+        listener = module.WebhookListener(url="https://hooks.example/snapapi", token="secret", timeout=1)
+        listener.end_test(
+            {"name": "Users", "source": "users.sapi"},
+            TestResult("Create", tags=["smoke"], status="passed"),
+        )
+        listener.end_suite(SuiteResult("Users", source="users.sapi", tests=[]))
+    finally:
+        ureq.urlopen = original_urlopen
+
+    assert len(posts) == 2
+    assert posts[0]["url"] == "https://hooks.example/snapapi"
+    assert posts[0]["auth"] == "Bearer secret"
+    assert posts[0]["body"]["event"] == "end_test"
+    assert posts[0]["body"]["test"]["name"] == "Create"
+    assert posts[0]["body"]["test"]["tags"] == ["smoke"]
+    assert posts[1]["body"]["event"] == "end_suite"
+
+
 def test_run_suites_and_cli_listener(http_server, tmp_path):
     http_server.on("GET", "/ok", json={"ok": True})
     suite = tmp_path / "one.sapi"

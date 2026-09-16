@@ -445,6 +445,98 @@ TEST: Sess
         os.chdir(old)
 
 
+def test_vcr_replay_headers_are_case_insensitive(http_server, tmp_path):
+    """Replay must match live requests: header names are case-insensitive."""
+    from snapapi.engine import _fake_response
+
+    # Cassette stored lowercase (HTTP/2 style) vs EXPECT Title-Case
+    lower = _fake_response({"status_code": 200, "headers": {"content-type": "application/json"}, "body": "{}"})
+    assert lower.headers.get("Content-Type") == "application/json"
+    assert lower.headers.get("CONTENT-TYPE") == "application/json"
+    assert lower.headers.get("CoNtEnT-TyPe") == "application/json"
+
+    # Cassette stored Title-Case vs EXPECT lowercase
+    titled = _fake_response({"status_code": 200, "headers": {"Content-Type": "application/json"}, "body": "{}"})
+    assert titled.headers.get("content-type") == "application/json"
+
+    # Live vs replay: same EXPECT must pass both ways
+    http_server.on(
+        "GET",
+        "/hdr",
+        json={"ok": True},
+        headers={"Content-Type": "application/json; charset=utf-8"},
+    )
+    cassette_dir = tmp_path / "cassettes"
+    live = f"""
+SUITE: Hdr
+URL: {http_server.base_url}
+TEST: Live
+  GET: /hdr
+  EXPECT: status == 200
+  EXPECT: header Content-Type exists
+  EXPECT: header content-type contains json
+  EXPECT: header CONTENT-TYPE starts-with application
+"""
+    result, _, _ = run_dsl(live)
+    assert result.ok
+
+    suite = tmp_path / "hdr.snaptest"
+    suite.write_text(
+        f"""
+SUITE: Hdr
+OPTIONS: {{"CASSETTE_DIR": "{cassette_dir.as_posix()}", "MODE": "record"}}
+URL: {http_server.base_url}
+TEST: Rec
+  GET: /hdr
+  EXPECT: status == 200
+""",
+        encoding="utf-8",
+    )
+    old = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        assert main([str(suite)]) == 0
+        # Force lowercase names in the cassette (as HTTP/2 / many servers store them)
+        cassette = next(cassette_dir.glob("*.json"))
+        payload = json.loads(cassette.read_text(encoding="utf-8"))
+        lowered = {str(key).lower(): value for key, value in (payload.get("headers") or {}).items()}
+        payload["headers"] = lowered
+        cassette.write_text(json.dumps(payload), encoding="utf-8")
+        suite.write_text(
+            f"""
+SUITE: Hdr
+OPTIONS: {{"CASSETTE_DIR": "{cassette_dir.as_posix()}"}}
+URL: {http_server.base_url}
+TEST: Replay
+  GET: /hdr
+  EXPECT: status == 200
+  EXPECT: header Content-Type exists
+  EXPECT: header content-type contains json
+  EXPECT: header CONTENT-TYPE starts-with application
+""",
+            encoding="utf-8",
+        )
+        before = len(http_server.requests)
+        assert main([str(suite), "--mode", "replay"]) == 0
+        assert len(http_server.requests) == before
+    finally:
+        os.chdir(old)
+
+
+def test_fake_response_preserves_set_cookie_list_values():
+    from snapapi.engine import _fake_response
+
+    response = _fake_response(
+        {
+            "status_code": 200,
+            "headers": {"Set-Cookie": ["a=1; Path=/", "b=2; Path=/"]},
+            "body": "",
+        }
+    )
+    assert response.headers.get("set-cookie") == ["a=1; Path=/", "b=2; Path=/"]
+    assert response.headers.get("SET-COOKIE") == ["a=1; Path=/", "b=2; Path=/"]
+
+
 def test_jsonpath_wildcard_assert_and_html_report(http_server, tmp_path):
     http_server.on("GET", "/items", json={"items": [{"id": 1}, {"id": 2}]})
     suite = tmp_path / "wild.snaptest"

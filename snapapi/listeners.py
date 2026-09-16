@@ -1,3 +1,36 @@
+"""SnapAPI run listeners.
+
+Listeners wrap a run so you can push results to CI, a TMS, Slack, or a webhook.
+They do not change pass/fail. Implement only the hooks you need.
+
+Contract
+--------
+Hooks (all optional)::
+
+    start_suite(suite)           # suite dict: name, source, …
+    start_test(suite, name, tags)
+    end_test(suite, test)        # test is TestResult
+    end_suite(result)            # result is SuiteResult
+    report_written(kind, path)   # kind: html | json | junit
+    close()
+
+``TestResult`` fields: ``name``, ``tags``, ``status`` (passed|failed|skipped),
+``duration_ms``, ``error``, ``requests`` (list of ``RequestResult``).
+Use ``test.to_dict()`` for a JSON-serializable snapshot (bodies/headers redacted).
+
+``SuiteResult`` fields: ``name``, ``source``, ``tests``, ``duration_ms``,
+``passed`` / ``failed`` / ``skipped`` / ``ok``, optional suite ``error``.
+Use ``result.to_dict()``.
+
+CLI::
+
+    snapapi tests/ --listener path/to/reporter.py:ClassName
+
+Exceptions in listeners are warnings only; they never flip a test result.
+
+See ``examples/print_listener.py`` and ``examples/webhook_listener.py``.
+"""
+
 from __future__ import annotations
 
 import importlib

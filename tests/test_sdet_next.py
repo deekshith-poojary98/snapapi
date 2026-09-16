@@ -1,6 +1,8 @@
 import json
 import time
 
+import pytest
+
 from snapapi.cassette import cassette_key
 from snapapi.cli import main
 from snapapi.mock import MockServer, load_mock_routes
@@ -255,27 +257,157 @@ TEST: Ping
     assert result.passed == 1
 
 
-def test_oauth_pkce_sends_s256_fields(http_server):
-    http_server.on("POST", "/oauth/token", json={"access_token": "tok-pkce"})
+def test_oauth_pkce_s256_rfc7636_vector():
+    from snapapi.engine import pkce_challenge_s256
+
+    # RFC 7636 Appendix B
+    verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+    assert pkce_challenge_s256(verifier) == "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"
+
+
+def test_oauth_pkce_token_request_sends_verifier_not_challenge(http_server):
+    from snapapi.engine import pkce_challenge_s256
+    from urllib.parse import parse_qs
+
+    verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+    expected_challenge = pkce_challenge_s256(verifier)
+    bound = {"challenge": expected_challenge}
+
+    def token_handler(record):
+        form = parse_qs(record.get("body") or "")
+        got_verifier = (form.get("code_verifier") or [None])[0]
+        if "code_challenge" in form or "code_challenge_method" in form:
+            return 400, {"Content-Type": "application/json"}, {"error": "challenge_on_token"}
+        if not got_verifier:
+            return 400, {"Content-Type": "application/json"}, {"error": "missing_verifier"}
+        if pkce_challenge_s256(got_verifier) != bound["challenge"]:
+            return 400, {"Content-Type": "application/json"}, {"error": "invalid_grant"}
+        return 200, {"Content-Type": "application/json"}, {"access_token": "tok-pkce"}
+
+    http_server.on("POST", "/oauth/token", handler=token_handler)
     http_server.on("GET", "/me", json={"ok": True})
     result, _, _ = run_dsl(
         _suite(
             http_server,
             f"""
 TEST: Pkce
-  AUTH: oauth2 grant=authorization_code token_url={http_server.base_url}/oauth/token auth_url={http_server.base_url}/authorize client_id=id redirect_uri=http://localhost/cb code=abc pkce=true
+  AUTH: oauth2 grant=authorization_code token_url={http_server.base_url}/oauth/token client_id=id redirect_uri=http://localhost/cb code=abc pkce=true code_verifier={verifier}
   GET: /me
   EXPECT: status == 200
 """,
         )
     )
     assert result.ok
-    token_req = http_server.requests[0]
-    assert "code_verifier=" in token_req["body"]
-    assert "code_challenge=" in token_req["body"]
-    assert "S256" in token_req["body"]
-    assert "grant_type=authorization_code" in token_req["body"]
+    form = parse_qs(http_server.requests[0]["body"])
+    assert form.get("code_verifier") == [verifier]
+    assert "code_challenge" not in form
+    assert "code_challenge_method" not in form
+    assert form.get("grant_type") == ["authorization_code"]
+    # Same verifier as authorize-time challenge (cryptographic link)
+    assert pkce_challenge_s256(form["code_verifier"][0]) == expected_challenge
     assert http_server.requests[1]["headers"].get("Authorization") == "Bearer tok-pkce"
+
+
+def test_oauth_pkce_wrong_verifier_fails_token_exchange(http_server):
+    from snapapi.engine import pkce_challenge_s256
+    from urllib.parse import parse_qs
+
+    authorize_verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"
+    bound_challenge = pkce_challenge_s256(authorize_verifier)
+    wrong_verifier = "a" * 43
+
+    def token_handler(record):
+        form = parse_qs(record.get("body") or "")
+        got = (form.get("code_verifier") or [None])[0]
+        if not got or pkce_challenge_s256(got) != bound_challenge:
+            return 400, {"Content-Type": "application/json"}, {"error": "invalid_grant"}
+        return 200, {"Content-Type": "application/json"}, {"access_token": "should-not-issue"}
+
+    http_server.on("POST", "/oauth/token", handler=token_handler)
+    http_server.on("GET", "/me", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            f"""
+TEST: WrongVerifier
+  AUTH: oauth2 grant=authorization_code token_url={http_server.base_url}/oauth/token client_id=id redirect_uri=http://localhost/cb code=abc pkce=true code_verifier={wrong_verifier}
+  GET: /me
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert "OAuth2 token request failed" in (result.tests[0].error or "")
+    assert http_server.requests[0]["path"] == "/oauth/token"
+    assert all(item["path"] != "/me" for item in http_server.requests)
+
+
+def test_oauth_pkce_requires_code_verifier():
+    from snapapi.exceptions import ParseError
+
+    with pytest.raises(ParseError, match="code_verifier"):
+        parse_dsl(
+            """
+SUITE: Pkce
+URL: http://example.com
+TEST: Missing verifier
+  AUTH: oauth2 grant=authorization_code token_url=http://example.com/token client_id=id redirect_uri=http://localhost code=abc pkce=true
+  GET: /me
+  EXPECT: status == 200
+"""
+        )
+
+
+def test_oauth_pkce_requires_code():
+    import io
+
+    from snapapi.engine import Engine
+
+    suite = parse_dsl(
+        """
+SUITE: Pkce
+URL: http://example.com
+TEST: No code
+  AUTH: oauth2 grant=authorization_code token_url=http://example.com/token client_id=id redirect_uri=http://localhost code_verifier=abc123pkceverifierVALUE00000000001 pkce=true
+  GET: /me
+  EXPECT: status == 200
+"""
+    )
+    engine = Engine(suite, stream=io.StringIO(), timeout=1)
+    result = engine.run()
+    assert not result.ok
+    assert "AUTH_CODE" in (result.tests[0].error or "")
+
+
+def test_oauth_authorization_code_without_pkce_omits_verifier(http_server):
+    from urllib.parse import parse_qs
+
+    http_server.on("POST", "/oauth/token", json={"access_token": "tok-plain"})
+    http_server.on("GET", "/me", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            f"""
+TEST: NoPkce
+  AUTH: oauth2 grant=authorization_code token_url={http_server.base_url}/oauth/token client_id=id redirect_uri=http://localhost/cb code=abc
+  GET: /me
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert result.ok
+    form = parse_qs(http_server.requests[0]["body"])
+    assert "code_verifier" not in form
+    assert "code_challenge" not in form
+
+
+def test_code_verifier_is_redacted():
+    from snapapi.redact import redact_body, redact_saved
+
+    assert redact_saved("code_verifier", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk") == "***"
+    body = redact_body("grant_type=authorization_code&code_verifier=supersecretverifiervalue")
+    assert "supersecretverifiervalue" not in body
+    assert "***" in body
 
 
 def test_watch_detects_new_files(tmp_path):
@@ -536,24 +668,3 @@ TEST: B
     assert suite["tests"][1]["steps"][0]["action"] == "OPTIONS"
     assert suite["tests"][1]["steps"][1]["action"] == "HEAD"
     assert suite["options"]["OPENAPI-STRICT"] is True
-
-
-def test_oauth_pkce_requires_code():
-    import io
-
-    from snapapi.engine import Engine
-
-    suite = parse_dsl(
-        """
-SUITE: Pkce
-URL: http://example.com
-TEST: No code
-  AUTH: oauth2 grant=authorization_code token_url=http://example.com/token auth_url=http://example.com/auth client_id=id redirect_uri=http://localhost pkce=true
-  GET: /me
-  EXPECT: status == 200
-"""
-    )
-    engine = Engine(suite, stream=io.StringIO(), timeout=1)
-    result = engine.run()
-    assert not result.ok
-    assert "AUTH_CODE" in (result.tests[0].error or "")

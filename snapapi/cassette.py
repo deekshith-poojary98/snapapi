@@ -26,7 +26,14 @@ def parse_vcr_match(value):
     return [VCR_HEADER_ALIASES.get(item, item) for item in items] or list(DEFAULT_VCR_MATCH)
 
 
-def cassette_key(method, url, body=None, headers=None, match=None):
+def cassette_key(method, url, body=None, headers=None, match=None, files=None):
+    """Build a stable cassette id for the outbound HTTP request.
+
+    Default match fields (``query``, ``body``, ``content-type``, ``accept``) identify
+    the request. When ``body`` is matched, FILE uploads participate via field name,
+    filename, and content digest — the multipart payload identity, not just JSON/form
+    ``data`` / ``raw_body``.
+    """
     match_keys = parse_vcr_match(match)
     parts = urlsplit(url or "")
     if "query" in match_keys:
@@ -43,7 +50,10 @@ def cassette_key(method, url, body=None, headers=None, match=None):
             selected.append((lowered, "" if value is None else str(value)))
     selected.sort()
     header_blob = "\n".join(f"{key}:{value}" for key, value in selected)
-    body_blob = _body_text(body) if "body" in match_keys else ""
+    if "body" in match_keys:
+        body_blob = _payload_text(body, files)
+    else:
+        body_blob = ""
     raw = f"{method.upper()}\n{canonical}\n{header_blob}\n{body_blob}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -71,6 +81,18 @@ def save_cassette(directory, key, payload):
     (path / f"{key}.json").write_text(json.dumps(record, indent=2, default=str) + "\n", encoding="utf-8")
 
 
+def _payload_text(body, files=None):
+    """Canonicalize JSON/form/raw body plus multipart FILE parts for cassette identity."""
+    chunks = []
+    body_text = _body_text(body)
+    if body_text:
+        chunks.append(body_text)
+    files_text = _files_text(files)
+    if files_text:
+        chunks.append(files_text)
+    return "\n".join(chunks)
+
+
 def _body_text(body):
     if body is None:
         return ""
@@ -79,3 +101,46 @@ def _body_text(body):
     if isinstance(body, bytes):
         return hashlib.sha256(body).hexdigest()
     return str(body)
+
+
+def _files_text(files):
+    if not files:
+        return ""
+    lines = []
+    for field, item in files.items():
+        filename, digest = _file_fingerprint(item)
+        lines.append(f"{field}:{filename}:{digest}")
+    return "\n".join(lines)
+
+
+def _file_fingerprint(item):
+    """Return (filename, sha256-hex) for a requests-style files value; rewind file objects."""
+    if isinstance(item, (tuple, list)) and item:
+        filename = str(item[0])
+        payload = item[1] if len(item) > 1 else b""
+    else:
+        filename = getattr(item, "name", "") or ""
+        payload = item
+    data = _read_file_bytes(payload)
+    return filename, hashlib.sha256(data).hexdigest()
+
+
+def _read_file_bytes(payload):
+    if payload is None:
+        return b""
+    if isinstance(payload, (bytes, bytearray)):
+        return bytes(payload)
+    if isinstance(payload, str):
+        return payload.encode("utf-8")
+    read = getattr(payload, "read", None)
+    if not callable(read):
+        return str(payload).encode("utf-8")
+    seek = getattr(payload, "seek", None)
+    if callable(seek):
+        seek(0)
+    data = read()
+    if callable(seek):
+        seek(0)
+    if isinstance(data, str):
+        return data.encode("utf-8")
+    return bytes(data or b"")

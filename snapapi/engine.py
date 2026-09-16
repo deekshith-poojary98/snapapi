@@ -8,7 +8,6 @@ import threading
 import time
 import base64
 import hashlib
-import secrets
 from concurrent.futures import FIRST_COMPLETED, CancelledError, ThreadPoolExecutor, wait
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,8 +16,9 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import requests
 from colorama import Fore, Style, init
 from requests.auth import HTTPDigestAuth
+from requests.structures import CaseInsensitiveDict
 
-from snapapi.api_client import APIClient, open_files
+from snapapi.api_client import APIClient, opened_files
 from snapapi.cassette import cassette_key, load_cassettes, parse_vcr_match, save_cassette
 from snapapi.exceptions import CallError, JsonPathError, SnapAPIError, XPathError
 from snapapi.listeners import notify
@@ -30,11 +30,13 @@ from snapapi.redact import redact_body, redact_headers, redact_saved
 from snapapi.safety import assert_public_url
 from snapapi.select import eval_keyword_expr, eval_tag_expr
 from snapapi.variables import VAR_PATTERN, interpolate
+from snapapi.version import __version__ as SNAPAPI_VERSION
 
 init(autoreset=True)
 
 RETRY_BACKOFF_SECONDS = 0.05
 REQUEST_COL_WIDTH = 32
+WAIT_MAX_ATTEMPTS = 10000
 
 
 def format_duration(ms):
@@ -280,6 +282,8 @@ class Engine:
         self._helpers = helper_names(suite)
         self._print_lock = threading.Lock()
         self._oauth_cache = {}
+        self._oauth_lock = threading.Lock()
+        self._oauth_bearer = None
         self._cassettes = load_cassettes(self.cassette_dir) if self.mode in ("replay", "record-on-miss") else {}
         self._cassette_lock = threading.Lock()
         self._last_duration = 0
@@ -323,92 +327,122 @@ class Engine:
         self._notify("start_suite", self._suite_info())
 
         results = []
+        suite_error = None
+        suite_error_name = None
+        setup_failed = False
         if self.suite.get("setup"):
             setup_result = self._run_test(self.suite["setup"], role="setup")
             if setup_result.status == "failed":
+                setup_failed = True
                 setup_name = f"SUITE-SETUP ({self.suite['setup']})"
                 reason = f"suite setup {self.suite['setup']!r} failed"
                 results.extend(self._skip_primaries(reason))
-                suite_result = SuiteResult(
-                    name=self.suite.get("name"),
-                    source=self.suite.get("source"),
-                    tests=results,
-                    duration_ms=(time.perf_counter() - started) * 1000,
-                    error=setup_result.error or "failed",
-                    error_name=setup_name,
-                )
-                self.print_summary(suite_result)
-                self._notify("end_suite", suite_result)
-                return suite_result
+                suite_error = setup_result.error or "failed"
+                suite_error_name = setup_name
 
-        primaries = self._primary_tests()
-        use_parallel = self.workers > 1
-        if use_parallel:
-            deps = self._sibling_save_deps(primaries)
-            if deps:
-                self._print(
-                    self._paint(
-                        "  warning: tests share SAVE values across primaries; running sequentially",
-                        Fore.YELLOW,
-                    )
-                )
-                use_parallel = False
-                self.isolate_variables = False
-            elif any(test.get("depends") for test in primaries):
-                use_parallel = False
-        if use_parallel:
-            results.extend(self._run_parallel(primaries))
-        else:
-            for test in primaries:
-                skip_reason = self._skip_reason(test)
-                if skip_reason:
-                    results.append(
-                        TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped", error=skip_reason)
-                    )
-                    self._record_dep_status(test["name"], "skipped")
-                    self._notify("end_test", self._suite_info(), results[-1])
-                    continue
-                if not self._matches_filter(test):
-                    results.append(TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped"))
-                    self._notify("end_test", self._suite_info(), results[-1])
-                    continue
-                dep_reason = self._depends_reason(test)
-                if dep_reason:
-                    self._print_skip(test, dep_reason)
-                    results.append(
-                        TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped", error=dep_reason)
-                    )
-                    self._record_dep_status(test["name"], "skipped")
-                    self._notify("end_test", self._suite_info(), results[-1])
-                    continue
-                self._notify("start_test", self._suite_info(), test["name"], test.get("tags") or [])
-                batch = self._run_examples(test)
-                self._record_dep_batch(test["name"], batch)
-                results.extend(batch)
-                for item in batch:
-                    self._notify("end_test", self._suite_info(), item)
-                if self._should_stop(results):
-                    hint = (
-                        "omit -x / --stop-on-failure to continue"
-                        if self.stop_on_failure
-                        else "stopped by --maxfail"
-                    )
+        if not setup_failed:
+            primaries = self._primary_tests()
+            use_parallel = self.workers > 1
+            if use_parallel:
+                deps = self._sibling_save_deps(primaries)
+                if deps:
                     self._print(
                         self._paint(
-                            f"  stopped after {test['name']!r}  ({hint})",
-                            Fore.RED,
+                            "  warning: tests share SAVE values across primaries; running sequentially",
+                            Fore.YELLOW,
                         )
                     )
-                    break
+                    use_parallel = False
+                    self.isolate_variables = False
+                elif any(test.get("depends") for test in primaries):
+                    use_parallel = False
+            if use_parallel:
+                results.extend(self._run_parallel(primaries))
+            else:
+                for test in primaries:
+                    skip_reason = self._skip_reason(test)
+                    if skip_reason:
+                        results.append(
+                            TestResult(
+                                name=test["name"],
+                                tags=test.get("tags") or [],
+                                status="skipped",
+                                error=skip_reason,
+                            )
+                        )
+                        self._record_dep_status(test["name"], "skipped")
+                        self._notify("end_test", self._suite_info(), results[-1])
+                        continue
+                    if not self._matches_filter(test):
+                        results.append(
+                            TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped")
+                        )
+                        self._notify("end_test", self._suite_info(), results[-1])
+                        continue
+                    dep_reason = self._depends_reason(test)
+                    if dep_reason:
+                        self._print_skip(test, dep_reason)
+                        results.append(
+                            TestResult(
+                                name=test["name"],
+                                tags=test.get("tags") or [],
+                                status="skipped",
+                                error=dep_reason,
+                            )
+                        )
+                        self._record_dep_status(test["name"], "skipped")
+                        self._notify("end_test", self._suite_info(), results[-1])
+                        continue
+                    self._notify("start_test", self._suite_info(), test["name"], test.get("tags") or [])
+                    batch = self._run_examples(test)
+                    self._record_dep_batch(test["name"], batch)
+                    results.extend(batch)
+                    for item in batch:
+                        self._notify("end_test", self._suite_info(), item)
+                    if self._should_stop(results):
+                        hint = (
+                            "omit -x / --stop-on-failure to continue"
+                            if self.stop_on_failure
+                            else "stopped by --maxfail"
+                        )
+                        self._print(
+                            self._paint(
+                                f"  stopped after {test['name']!r}  ({hint})",
+                                Fore.RED,
+                            )
+                        )
+                        break
 
+        # Always attempt SUITE-TEARDOWN when declared — including after setup
+        # failure — so partial setup cannot leak resources silently.
         if self.suite.get("teardown"):
-            self._run_test(self.suite["teardown"], role="teardown")
+            teardown_name = self.suite["teardown"]
+            try:
+                teardown_result = self._run_test(teardown_name, role="teardown")
+            except SnapAPIError as exc:
+                self._print_error(str(exc), under_request=False)
+                teardown_result = TestResult(name=teardown_name, status="failed", error=str(exc))
+            except Exception as exc:
+                # Teardown must not crash the runner or discard the suite outcome.
+                message = f"SUITE-TEARDOWN ({teardown_name}) crashed: {exc}"
+                self._print_error(message, under_request=False)
+                teardown_result = TestResult(name=teardown_name, status="failed", error=message)
+            if teardown_result.status == "failed":
+                label = f"SUITE-TEARDOWN ({teardown_name})"
+                detail = teardown_result.error or "failed"
+                if suite_error:
+                    suite_error = f"{suite_error}\n{label} also failed: {detail}"
+                else:
+                    suite_error = detail
+                    suite_error_name = label
 
         suite_result = SuiteResult(
             name=self.suite.get("name"),
             source=self.suite.get("source"),
             tests=results,
             duration_ms=(time.perf_counter() - started) * 1000,
+            error=suite_error,
+            error_name=suite_error_name,
         )
         self.print_summary(suite_result)
         self._notify("end_suite", suite_result)
@@ -619,6 +653,7 @@ class Engine:
             color=self._color,
         )
         child._oauth_cache = self._oauth_cache
+        child._oauth_lock = self._oauth_lock
         child._cassettes = self._cassettes
         child._cassette_lock = self._cassette_lock
         child._helpers = self._helpers
@@ -706,16 +741,19 @@ class Engine:
             follow = self.suite.get("follow_redirects")
         if follow is None:
             follow = True
-        client = self._new_client(base_url, follow_redirects=follow)
+        try:
+            client = self._new_client(base_url, follow_redirects=follow)
+        except SnapAPIError as exc:
+            self._print_error(str(exc), under_request=False)
+            return False, str(exc), []
         self._client = client
+        self._oauth_bearer = None
         oauth = test.get("oauth2") or self.suite.get("oauth2")
         if oauth:
             try:
-                token = self._oauth_token(oauth)
+                self._oauth_bearer = self._oauth_token(oauth)
             except SnapAPIError as exc:
                 return False, str(exc), []
-            test.setdefault("headers", {})
-            test["headers"]["Authorization"] = f"Bearer {token}"
         requests_log = []
         for step in test.get("steps") or []:
             ok, error, recorded = self._execute_step(client, step, test)
@@ -727,7 +765,6 @@ class Engine:
 
     def _execute_step(self, client, step, test):
         method = step["action"]
-        handles = []
         try:
             self._apply_preps(step)
             endpoint = self._interp(step["endpoint"])
@@ -737,6 +774,8 @@ class Engine:
             raw_body = self._interp(step.get("raw_body")) if step.get("raw_body") is not None else None
             headers = {}
             headers.update(test.get("headers") or {})
+            if self._oauth_bearer:
+                headers["Authorization"] = f"Bearer {self._oauth_bearer}"
             headers.update(step.get("headers") or {})
             headers = self._interp(headers) if headers else {}
             if step.get("oauth2"):
@@ -748,7 +787,6 @@ class Engine:
                     self._interp(digest.get("username") or ""),
                     self._interp(digest.get("password") or ""),
                 )
-            files, handles = open_files(step.get("files"), self._base_dir())
         except SnapAPIError as exc:
             self._print_error(str(exc), under_request=False)
             return False, str(exc), None
@@ -774,7 +812,8 @@ class Engine:
 
         checks = step.get("checks") or []
         wait = step.get("wait")
-        attempts = max((check.get("retry") or 1) for check in checks) if checks else 1
+        # RETRY owns the outer budget; WAIT polls inside each attempt (Model A).
+        retry_attempts = max((check.get("retry") or 1) for check in checks) if checks else 1
         retry_on = next((check.get("retry_on") for check in checks if check.get("retry_on")), None)
         retry_backoff = next((check.get("retry_backoff") for check in checks if check.get("retry_backoff")), None)
         last_error = None
@@ -782,125 +821,172 @@ class Engine:
         body_type = step.get("body_type") or "json"
         follow = step.get("follow_redirects")
         oauth = step.get("oauth2") or test.get("oauth2") or self.suite.get("oauth2")
-        wait_deadline = time.time() + wait["timeout"] if wait else None
-        if wait:
-            attempts = max(attempts, 10000)
 
-        try:
-            for attempt in range(1, attempts + 1):
-                response = None
-                started = time.perf_counter()
-                try:
-                    response = self._dispatch(
-                        client,
-                        method,
-                        endpoint,
-                        data=data,
-                        raw_body=raw_body,
-                        headers=headers,
-                        files=files or None,
-                        body_type=body_type,
-                        content_type=step.get("content_type"),
-                        follow_redirects=follow,
-                        auth=auth,
-                    )
-                    if (
-                        getattr(response, "status_code", None) == 401
-                        and oauth
-                        and self._oauth_can_refresh(oauth)
-                    ):
-                        token = self._oauth_token(oauth, force_refresh=True)
-                        headers["Authorization"] = f"Bearer {token}"
-                        response = self._dispatch(
-                            client,
-                            method,
-                            endpoint,
-                            data=data,
-                            raw_body=raw_body,
-                            headers=headers,
-                            files=files or None,
-                            body_type=body_type,
-                            content_type=step.get("content_type"),
-                            follow_redirects=follow,
-                            auth=auth,
-                        )
-                    duration_ms = (time.perf_counter() - started) * 1000
-                    self._last_duration = duration_ms
-                    url = getattr(response, "url", endpoint)
-                    recorded = RequestResult(
-                        method,
-                        url,
-                        status_code=response.status_code,
-                        duration_ms=duration_ms,
-                        request_headers=headers,
-                        request_body=raw_body if raw_body is not None else data,
-                        response_headers=dict(getattr(response, "headers", {}) or {}),
-                        response_body=_response_text(response),
-                    )
-                    self._print_request(method, endpoint, response.status_code, duration_ms)
-                    if wait:
-                        self._execute_check(wait["check"], response, duration_ms, method, url)
-                    failures = []
-                    for check in checks:
-                        try:
-                            self._execute_check(check, response, duration_ms, method, url)
-                        except AssertionError as exc:
-                            failures.append(str(exc).strip())
-                    if failures:
-                        raise AssertionError("\n".join(failures))
-                    if self._openapi_spec is not None:
-                        self._validate_openapi(
-                            self._openapi_spec, method, url, response, strict=self.contract_strict
-                        )
-                    for save in step.get("saves") or []:
-                        self._save_value(save, response)
-                    return True, None, recorded
-                except AssertionError as exc:
-                    duration_ms = (time.perf_counter() - started) * 1000
-                    last_error = str(exc).strip()
-                    recorded = RequestResult(
-                        method,
-                        endpoint,
-                        status_code=None if response is None else response.status_code,
-                        duration_ms=duration_ms,
-                        error=last_error,
-                        request_headers=headers,
-                        request_body=raw_body if raw_body is not None else data,
-                        response_headers=dict(getattr(response, "headers", {}) or {}) if response is not None else {},
-                        response_body=_response_text(response) if response is not None else None,
-                    )
-                    retryable = _is_retryable(retry_on, response, network=False)
-                except (requests.RequestException, ValueError, SnapAPIError) as exc:
-                    duration_ms = (time.perf_counter() - started) * 1000
-                    last_error = str(exc)
-                    recorded = RequestResult(method, endpoint, duration_ms=duration_ms, error=last_error)
-                    self._print_request(method, endpoint, None, duration_ms)
-                    retryable = _is_retryable(retry_on, None, network=True)
+        def _send_once():
+            started_at = time.perf_counter()
+            response = self._dispatch_with_files(
+                client,
+                step,
+                method,
+                endpoint,
+                data=data,
+                raw_body=raw_body,
+                headers=headers,
+                body_type=body_type,
+                content_type=step.get("content_type"),
+                follow_redirects=follow,
+                auth=auth,
+            )
+            if (
+                getattr(response, "status_code", None) == 401
+                and oauth
+                and self._oauth_can_refresh(oauth)
+            ):
+                token = self._oauth_token(oauth, force_refresh=True)
+                headers["Authorization"] = f"Bearer {token}"
+                response = self._dispatch_with_files(
+                    client,
+                    step,
+                    method,
+                    endpoint,
+                    data=data,
+                    raw_body=raw_body,
+                    headers=headers,
+                    body_type=body_type,
+                    content_type=step.get("content_type"),
+                    follow_redirects=follow,
+                    auth=auth,
+                )
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            self._last_duration = duration_ms
+            url = getattr(response, "url", endpoint)
+            result = RequestResult(
+                method,
+                url,
+                status_code=response.status_code,
+                duration_ms=duration_ms,
+                request_headers=headers,
+                request_body=raw_body if raw_body is not None else data,
+                response_headers=dict(getattr(response, "headers", {}) or {}),
+                response_body=_response_text(response),
+            )
+            self._print_request(method, endpoint, response.status_code, duration_ms)
+            return response, result, duration_ms, url
 
-                if wait and wait_deadline is not None and time.time() + wait["backoff"] <= wait_deadline:
-                    time.sleep(wait["backoff"])
-                    continue
+        for attempt in range(1, retry_attempts + 1):
+            response = None
+            attempt_started = time.perf_counter()
+            retryable = False
+            try:
                 if wait:
-                    if last_error:
-                        self._print_error(last_error)
-                        if self.dump_on_fail and recorded:
-                            self._print_dump(recorded)
-                        self._emit_on_fail(test, recorded)
-                    return False, last_error, recorded
-                if attempt < attempts and retryable:
-                    delay = retry_backoff if retry_backoff is not None else self.retry_backoff * attempt
-                    time.sleep(delay)
-                    continue
+                    response, recorded, duration_ms, url, wait_error = self._wait_poll(
+                        _send_once,
+                        wait,
+                        method,
+                        endpoint,
+                    )
+                    if wait_error:
+                        raise AssertionError(wait_error)
+                else:
+                    response, recorded, duration_ms, url = _send_once()
 
-                if last_error:
-                    self._print_error(last_error)
-                    if self.dump_on_fail and recorded:
-                        self._print_dump(recorded)
-                    self._emit_on_fail(test, recorded)
-                return False, last_error, recorded
-        finally:
-            for handle in handles:
-                handle.close()
+                failures = []
+                for check in checks:
+                    try:
+                        self._execute_check(check, response, duration_ms, method, url)
+                    except AssertionError as exc:
+                        failures.append(str(exc).strip())
+                if failures:
+                    raise AssertionError("\n".join(failures))
+                if self._openapi_spec is not None:
+                    self._validate_openapi(
+                        self._openapi_spec, method, url, response, strict=self.contract_strict
+                    )
+                self._commit_saves(step.get("saves") or [], response)
+                return True, None, recorded
+            except AssertionError as exc:
+                duration_ms = (time.perf_counter() - attempt_started) * 1000
+                last_error = str(exc).strip()
+                recorded = RequestResult(
+                    method,
+                    endpoint,
+                    status_code=None if response is None else response.status_code,
+                    duration_ms=duration_ms,
+                    error=last_error,
+                    request_headers=headers,
+                    request_body=raw_body if raw_body is not None else data,
+                    response_headers=dict(getattr(response, "headers", {}) or {}) if response is not None else {},
+                    response_body=_response_text(response) if response is not None else None,
+                )
+                retryable = _is_retryable(retry_on, response, network=False)
+            except (requests.RequestException, ValueError, SnapAPIError) as exc:
+                duration_ms = (time.perf_counter() - attempt_started) * 1000
+                last_error = str(exc)
+                recorded = RequestResult(method, endpoint, duration_ms=duration_ms, error=last_error)
+                self._print_request(method, endpoint, None, duration_ms)
+                retryable = _is_retryable(retry_on, None, network=True)
+
+            if attempt < retry_attempts and retryable:
+                delay = retry_backoff if retry_backoff is not None else self.retry_backoff * attempt
+                time.sleep(delay)
+                continue
+
+            if last_error:
+                self._print_error(last_error)
+                if self.dump_on_fail and recorded:
+                    self._print_dump(recorded)
+                self._emit_on_fail(test, recorded)
+            return False, last_error, recorded
+
+        if last_error:
+            self._print_error(last_error)
+            if self.dump_on_fail and recorded:
+                self._print_dump(recorded)
+            self._emit_on_fail(test, recorded)
+        return False, last_error, recorded
+
+    def _wait_poll(self, send_once, wait, method, endpoint):
+        """Poll ``send_once`` until the WAIT check passes or timeout/cap.
+
+        Uses WAIT TIMEOUT/BACKOFF only. Does not consume RETRY budget — the caller
+        owns RETRY N / ON / BACKOFF around this poll.
+
+        Returns ``(response, recorded, duration_ms, url, error)``. On success
+        ``error`` is None; on timeout ``response`` is the last poll (if any).
+        """
+        deadline = time.time() + wait["timeout"]
+        last_error = None
+        response = None
+        recorded = None
+        duration_ms = 0
+        url = endpoint
+        for poll in range(1, WAIT_MAX_ATTEMPTS + 1):
+            poll_started = time.perf_counter()
+            try:
+                response, recorded, duration_ms, url = send_once()
+                self._execute_check(wait["check"], response, duration_ms, method, url)
+                return response, recorded, duration_ms, url, None
+            except AssertionError as exc:
+                last_error = str(exc).strip()
+            except (requests.RequestException, ValueError, SnapAPIError) as exc:
+                last_error = str(exc)
+                self._print_request(
+                    method, endpoint, None, (time.perf_counter() - poll_started) * 1000
+                )
+
+            if time.time() + wait["backoff"] <= deadline and poll < WAIT_MAX_ATTEMPTS:
+                time.sleep(wait["backoff"])
+                continue
+            break
+
+        if last_error is None:
+            last_error = f"WAIT timed out after {WAIT_MAX_ATTEMPTS} attempts"
+        return response, recorded, duration_ms, url, last_error
+
+    def _dispatch_with_files(self, client, step, method, endpoint, **kwargs):
+        with opened_files(step.get("files"), self._base_dir()) as files:
+            kwargs["files"] = files or None
+            return self._dispatch(client, method, endpoint, **kwargs)
 
     def _dispatch(self, client, method, endpoint, **kwargs):
         data = kwargs.get("data")
@@ -913,8 +999,13 @@ class Engine:
         auth = kwargs.get("auth")
         url = client._build_url(endpoint)
         body = raw_body if raw_body is not None else data
+        needs_key = self.mode in ("replay", "record") or self.record_on_miss
+        key = (
+            cassette_key(method, url, body, headers=headers, match=self.vcr_match, files=files)
+            if needs_key
+            else None
+        )
         if self.mode == "replay":
-            key = cassette_key(method, url, body, headers=headers, match=self.vcr_match)
             record = self._cassettes.get(key)
             if not record:
                 if self.record_on_miss:
@@ -949,7 +1040,6 @@ class Engine:
             auth=auth,
         )
         if self.mode == "record":
-            key = cassette_key(method, url, body, headers=headers, match=self.vcr_match)
             self._store_cassette(key, method, url, response)
         return response
 
@@ -989,6 +1079,12 @@ class Engine:
             if reason:
                 raise AssertionError(f"{reason}: {exc}") from None
             raise
+        except (TypeError, re.error) as exc:
+            message = _format_check_eval_error(exc)
+            reason = check.get("because")
+            if reason:
+                raise AssertionError(f"{reason}: {message}") from None
+            raise AssertionError(message) from exc
 
     def _run_check(self, check, response, duration_ms=0, method=None, url=None):
         check_type = check["type"]
@@ -1057,14 +1153,26 @@ class Engine:
             body = response.json()
         except ValueError as exc:
             raise AssertionError(f"Response is not JSON: {exc}") from exc
+        operator = check["operator"]
+        op_upper = _norm_operator(operator)
+        if op_upper in ("ABSENT", "EXISTS"):
+            count = jsonpath.count_matches(body, path)
+            if op_upper == "ABSENT":
+                assert count == 0, (
+                    f"JSON {path} should be absent, found {count} match(es)"
+                )
+            else:
+                assert count >= 1, f"JSON {path} should exist"
+            return
         try:
             actual = jsonpath.extract(body, path)
         except JsonPathError as exc:
             raise AssertionError(str(exc)) from exc
         expected = self._interp(check.get("value"))
-        operator = check["operator"]
         if operator.startswith("length "):
             cmp_op = operator.split(" ", 1)[1]
+            if not isinstance(actual, (str, bytes, list, tuple, dict, set)):
+                raise AssertionError(f"JSON {path} cannot take length of {_json_type_name(actual)}")
             self._compare(len(actual), cmp_op, expected, f"JSON {path} length")
             return
         if operator.upper() == "EACH":
@@ -1088,6 +1196,14 @@ class Engine:
         self._assert_json_value(actual, operator, expected, f"JSON {path}")
 
     def _assert_json_value(self, actual, operator, expected, label):
+        # JSON == / != follow JSON types (playground JS ===), not Python equality.
+        op = _norm_operator(operator)
+        if op == "==":
+            assert _json_equal(actual, expected), f"{label} expected {expected!r}, got {actual!r}"
+            return
+        if op == "!=":
+            assert not _json_equal(actual, expected), f"{label} expected not {expected!r}, got {actual!r}"
+            return
         _assert_value(actual, operator, expected, label)
 
     def _check_xpath(self, check, response):
@@ -1111,6 +1227,13 @@ class Engine:
         name = self._interp(check["name"])
         operator = _norm_operator(check["operator"])
         actual = response.headers.get(name)
+        if operator in ("ABSENT", "EXISTS"):
+            found = actual is not None
+            if operator == "ABSENT":
+                assert not found, f"Header {name} should be absent, got {actual!r}"
+            else:
+                assert found, f"Header {name} should exist"
+            return
         if operator in ("EMPTY", "NOT EMPTY"):
             actual = actual if actual is not None else ""
             _assert_value(actual, operator, None, f"Header {name}")
@@ -1168,44 +1291,105 @@ class Engine:
             raise AssertionError(f"Unknown operator {operator}")
         assert ok, f"{label} expected {operator} {right}, got {left}"
 
-    def _save_value(self, save, response):
+    def _extract_save_value(self, save, response):
+        """Resolve one SAVE without writing suite variables."""
         source = (save.get("source") or "json").lower()
         selector = self._interp(save["path"])
         if source == "header":
             value = response.headers.get(selector)
             if value is None:
                 raise AssertionError(f"Cannot SAVE header {selector}: missing")
-        elif source == "cookie":
+            return value
+        if source == "cookie":
             value = response.cookies.get(selector)
             if value is None and hasattr(self._client, "session"):
                 value = self._client.session.cookies.get(selector)
             if value is None:
                 raise AssertionError(f"Cannot SAVE cookie {selector}: missing")
-        else:
-            try:
-                body = response.json()
-            except ValueError as exc:
-                raise AssertionError(f"Cannot SAVE from non-JSON response: {exc}") from exc
-            try:
-                value = jsonpath.extract(body, selector)
-            except JsonPathError as exc:
-                raise AssertionError(str(exc)) from exc
-        self.variables[save["name"]] = value
+            return value
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise AssertionError(f"Cannot SAVE from non-JSON response: {exc}") from exc
+        try:
+            return jsonpath.extract(body, selector)
+        except JsonPathError as exc:
+            raise AssertionError(str(exc)) from exc
+
+    def _commit_saves(self, saves, response):
+        """Extract every SAVE in the batch, then commit all or none.
+
+        Duplicate names in one batch are allowed: declaration order, last write wins.
+        """
+        if not saves:
+            return
+        pending = []
+        for save in saves:
+            pending.append((save, self._extract_save_value(save, response)))
         indent = self._spaces(1)
-        shown = redact_saved(save["name"], value)
-        self._print(self._paint(f"{indent}saved {save['name']}={shown}", Style.DIM))
+        for save, value in pending:
+            self.variables[save["name"]] = value
+            shown = redact_saved(save["name"], value)
+            self._print(self._paint(f"{indent}saved {save['name']}={shown}", Style.DIM))
+
+    def _save_value(self, save, response):
+        self._commit_saves([save], response)
+
+    def _oauth_cache_key(self, spec):
+        """Identity for a cached access token.
+
+        Distinct token_url / client_id / secret / grant / username / redirect_uri
+        must not share a token. Scope is not a DSL parameter today.
+        """
+        grant = (spec.get("grant") or spec.get("grant_type") or "client_credentials").lower()
+        if grant in ("authorization-code", "authorization_code"):
+            grant = "authorization_code"
+        return (
+            self._interp(spec.get("token_url") or ""),
+            self._interp(spec.get("client_id") or ""),
+            self._interp(spec.get("client_secret") or ""),
+            grant,
+            self._interp(spec.get("username") or ""),
+            self._interp(spec.get("redirect_uri") or ""),
+        )
+
+    def _oauth_cached_access_token(self, key):
+        cached = self._oauth_cache.get(key)
+        if not cached:
+            return None
+        if isinstance(cached, str):
+            return cached
+        token = cached.get("access_token")
+        if not token:
+            return None
+        expires_at = cached.get("expires_at")
+        if expires_at is not None and time.time() >= float(expires_at):
+            return None
+        return token
 
     def _oauth_token(self, spec, force_refresh=False):
+        key = self._oauth_cache_key(spec)
+        if not force_refresh:
+            token = self._oauth_cached_access_token(key)
+            if token:
+                return token
+        with self._oauth_lock:
+            # Double-check after lock — waiters must reuse the winner's token.
+            if not force_refresh:
+                token = self._oauth_cached_access_token(key)
+                if token:
+                    return token
+            return self._oauth_fetch_token(key, spec, force_refresh=force_refresh)
+
+    def _oauth_fetch_token(self, key, spec, force_refresh=False):
+        """Request a token and publish it. Caller must hold ``_oauth_lock``."""
         token_url = self._interp(spec.get("token_url"))
         client_id = self._interp(spec.get("client_id"))
         secret = self._interp(spec.get("client_secret") or "")
         username = self._interp(spec.get("username") or "")
-        key = (token_url, client_id, username)
         cached = self._oauth_cache.get(key)
         if isinstance(cached, str):
             cached = {"access_token": cached}
-        if cached and cached.get("access_token") and not force_refresh:
-            return cached["access_token"]
         grant = (spec.get("grant") or spec.get("grant_type") or "client_credentials").lower()
         if force_refresh and cached and cached.get("refresh_token"):
             data = {
@@ -1227,7 +1411,7 @@ class Engine:
             if not code:
                 raise SnapAPIError(
                     "OAuth2 authorization_code requires code=${AUTH_CODE} "
-                    "(SnapAPI does not open a browser for PKCE)"
+                    "(SnapAPI does not open a browser)"
                 )
             data = {
                 "grant_type": "authorization_code",
@@ -1237,10 +1421,17 @@ class Engine:
                 "redirect_uri": self._interp(spec.get("redirect_uri") or ""),
             }
             if _as_bool(spec.get("pkce"), False):
-                verifier, challenge = _pkce_s256()
+                # RFC 7636: authorize step used code_challenge; token exchange
+                # sends only the same code_verifier. SnapAPI does not perform
+                # the authorize redirect — the caller must supply that verifier.
+                verifier = self._interp(spec.get("code_verifier") or "")
+                if not verifier:
+                    raise SnapAPIError(
+                        "OAuth2 pkce=true requires code_verifier=${PKCE_VERIFIER} "
+                        "(same verifier used when obtaining AUTH_CODE; "
+                        "SnapAPI does not open a browser)"
+                    )
                 data["code_verifier"] = verifier
-                data["code_challenge"] = challenge
-                data["code_challenge_method"] = "S256"
         else:
             data = {
                 "grant_type": "client_credentials",
@@ -1255,6 +1446,7 @@ class Engine:
             body_type="form",
         )
         if response.status_code >= 400:
+            # Do not poison the cache — waiters/retries may acquire again.
             raise SnapAPIError(f"OAuth2 token request failed: {response.status_code}")
         try:
             payload = response.json()
@@ -1263,17 +1455,21 @@ class Engine:
         token = payload.get("access_token")
         if not token:
             raise SnapAPIError("OAuth2 token response missing access_token")
-        self._oauth_cache[key] = {
+        entry = {
             "access_token": token,
             "refresh_token": payload.get("refresh_token") or (cached or {}).get("refresh_token"),
         }
+        expires_in = payload.get("expires_in")
+        if expires_in is not None:
+            try:
+                entry["expires_at"] = time.time() + float(expires_in)
+            except (TypeError, ValueError):
+                pass
+        self._oauth_cache[key] = entry
         return token
 
     def _oauth_can_refresh(self, spec):
-        token_url = self._interp(spec.get("token_url"))
-        client_id = self._interp(spec.get("client_id"))
-        username = self._interp(spec.get("username") or "")
-        cached = self._oauth_cache.get((token_url, client_id, username))
+        cached = self._oauth_cache.get(self._oauth_cache_key(spec))
         if isinstance(cached, dict) and cached.get("refresh_token"):
             return True
         return False
@@ -1434,6 +1630,7 @@ class Engine:
             verify=self.verify,
             cert=self.cert,
             proxies=self.proxies or None,
+            safe_url=self.safe_url,
         )
 
     def _primary_tests(self):
@@ -1775,10 +1972,49 @@ def _json_type_name(value):
     return type(value).__name__
 
 
+def _json_equal(left, right):
+    """JSON equality matching the playground (JS ``===`` on JSON values).
+
+    Booleans are never equal to numbers (``true != 1``). JSON numbers compare
+    numerically, so ``1 == 1.0``. Objects and arrays compare structurally.
+    """
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left is right
+    if left is None or right is None:
+        return left is right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return left == right
+    if isinstance(left, str) and isinstance(right, str):
+        return left == right
+    if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
+        if len(left) != len(right):
+            return False
+        return all(_json_equal(a, b) for a, b in zip(left, right))
+    if isinstance(left, dict) and isinstance(right, dict):
+        if left.keys() != right.keys():
+            return False
+        return all(_json_equal(left[key], right[key]) for key in left)
+    return left == right
+
+
 def _same_set(left, right):
     left_items = list(left)
     right_items = list(right)
     return all(item in right_items for item in left_items) and all(item in left_items for item in right_items)
+
+
+def _format_check_eval_error(exc):
+    if isinstance(exc, re.error):
+        return f"Invalid regex pattern: {exc}"
+    return f"Check evaluation failed: {exc}"
+
+
+def _regex_search(pattern, text, label):
+    try:
+        compiled = re.compile(str(pattern))
+    except re.error as exc:
+        raise AssertionError(f"{label} invalid regex pattern {pattern!r}: {exc}") from exc
+    return compiled.search(str(text))
 
 
 def _assert_value(actual, operator, expected, label, delta=None):
@@ -1798,9 +2034,11 @@ def _assert_value(actual, operator, expected, label, delta=None):
         else:
             assert str(expected) not in str(actual), f"{label} value {actual!r} unexpectedly contains {expected!r}"
     elif op == "MATCHES":
-        assert re.search(str(expected), str(actual)), f"{label} value {actual!r} does not match {expected!r}"
+        matched = _regex_search(expected, actual, label)
+        assert matched, f"{label} value {actual!r} does not match {expected!r}"
     elif op == "NOT MATCHES":
-        assert not re.search(str(expected), str(actual)), f"{label} value {actual!r} unexpectedly matches {expected!r}"
+        matched = _regex_search(expected, actual, label)
+        assert not matched, f"{label} value {actual!r} unexpectedly matches {expected!r}"
     elif op == "STARTS-WITH":
         assert str(actual).startswith(str(expected)), f"{label} value {actual!r} does not start with {expected!r}"
     elif op == "ENDS-WITH":
@@ -1826,6 +2064,9 @@ def _assert_value(actual, operator, expected, label, delta=None):
     elif op == "IN":
         options = _as_list(expected)
         assert actual in options, f"{label} value {actual!r} not in {expected!r}"
+    elif op == "NOT IN":
+        options = _as_list(expected)
+        assert actual not in options, f"{label} value {actual!r} unexpectedly in {expected!r}"
     elif op == "CONTAINS-ALL":
         if not isinstance(actual, (list, tuple, set)):
             raise AssertionError(f"{label} contains-all requires an array, got {actual!r}")
@@ -1843,6 +2084,75 @@ def _assert_value(actual, operator, expected, label, delta=None):
         else:
             found = any(str(item) in str(actual) for item in wanted)
         assert found, f"{label} value {actual!r} does not contain any of {expected!r}"
+    elif op == "CONTAINS-SEQUENCE":
+        if not isinstance(actual, (list, tuple)):
+            raise AssertionError(f"{label} contains-sequence requires an array, got {actual!r}")
+        wanted = _as_list(expected)
+        if not wanted:
+            raise AssertionError(f"{label} contains-sequence requires a non-empty sequence")
+        haystack = list(actual)
+        found = any(haystack[i : i + len(wanted)] == wanted for i in range(0, len(haystack) - len(wanted) + 1))
+        assert found, f"{label} value {actual!r} does not contain sequence {wanted!r}"
+    elif op == "SUBSET-OF":
+        if not isinstance(actual, (list, tuple, set)):
+            raise AssertionError(f"{label} subset-of requires an array, got {actual!r}")
+        universe = _as_list(expected)
+        extra = [item for item in actual if item not in universe]
+        assert not extra, f"{label} value {actual!r} is not a subset of {universe!r} (extra {extra!r})"
+    elif op == "CONTAINS-KEYS":
+        if not isinstance(actual, dict):
+            raise AssertionError(f"{label} contains-keys requires an object, got {actual!r}")
+        wanted = [str(item) for item in _as_list(expected)]
+        missing = [key for key in wanted if key not in actual]
+        assert not missing, f"{label} missing keys {missing!r} in {sorted(actual.keys())!r}"
+    elif op == "NOT CONTAINS-KEYS":
+        if not isinstance(actual, dict):
+            raise AssertionError(f"{label} not contains-keys requires an object, got {actual!r}")
+        unwanted = [str(item) for item in _as_list(expected)]
+        present = [key for key in unwanted if key in actual]
+        assert not present, f"{label} unexpectedly has keys {present!r}"
+    elif op == "SORTED":
+        if not isinstance(actual, (list, tuple)):
+            raise AssertionError(f"{label} sorted requires an array, got {actual!r}")
+        items = list(actual)
+        try:
+            assert items == sorted(items), f"{label} expected ascending sort, got {actual!r}"
+        except TypeError as exc:
+            raise AssertionError(f"{label} cannot sort values {actual!r}") from exc
+    elif op == "SORTED DESC":
+        if not isinstance(actual, (list, tuple)):
+            raise AssertionError(f"{label} sorted desc requires an array, got {actual!r}")
+        items = list(actual)
+        try:
+            assert items == sorted(items, reverse=True), f"{label} expected descending sort, got {actual!r}"
+        except TypeError as exc:
+            raise AssertionError(f"{label} cannot sort values {actual!r}") from exc
+    elif op == "ZERO":
+        try:
+            value = float(actual)
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} zero requires a number, got {actual!r}") from exc
+        assert value == 0, f"{label} expected 0, got {actual!r}"
+    elif op == "POSITIVE":
+        try:
+            value = float(actual)
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} positive requires a number, got {actual!r}") from exc
+        assert value > 0, f"{label} expected > 0, got {actual!r}"
+    elif op == "NEGATIVE":
+        try:
+            value = float(actual)
+        except (TypeError, ValueError) as exc:
+            raise AssertionError(f"{label} negative requires a number, got {actual!r}") from exc
+        assert value < 0, f"{label} expected < 0, got {actual!r}"
+    elif op == "EQUALS-IGNORING-CASE":
+        assert str(actual).lower() == str(expected).lower(), (
+            f"{label} expected {expected!r} ignoring case, got {actual!r}"
+        )
+    elif op == "CONTAINS-IGNORING-CASE":
+        assert str(expected).lower() in str(actual).lower(), (
+            f"{label} value {actual!r} does not contain {expected!r} ignoring case"
+        )
     elif op == "BETWEEN":
         bounds = _as_list(expected)
         if len(bounds) != 2:
@@ -1879,11 +2189,10 @@ def _assert_value(actual, operator, expected, label, delta=None):
         raise AssertionError(f"Unknown operator {operator}")
 
 
-def _pkce_s256():
-    verifier = secrets.token_urlsafe(32)
-    digest = hashlib.sha256(verifier.encode("ascii")).digest()
-    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    return verifier, challenge
+def pkce_challenge_s256(verifier):
+    """RFC 7636 S256: BASE64URL(SHA256(ASCII(code_verifier))) without padding."""
+    digest = hashlib.sha256(str(verifier).encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 def merge_query(endpoint, params):
@@ -1967,7 +2276,8 @@ def _is_retryable(retry_on, response, network=False):
 
 def _fake_response(record, session=None):
     body = record.get("body") or ""
-    headers = record.get("headers") or {}
+    # Match live ``requests`` responses: header names are case-insensitive.
+    headers = CaseInsensitiveDict(record.get("headers") or {})
     cookies = _apply_cassette_cookies(session, headers)
 
     def _json():
@@ -2023,7 +2333,7 @@ def _as_har(recorded):
     return {
         "log": {
             "version": "1.2",
-            "creator": {"name": "snapapi", "version": "0.3.0"},
+            "creator": {"name": "snapapi", "version": SNAPAPI_VERSION},
             "entries": [
                 {
                     "request": {
