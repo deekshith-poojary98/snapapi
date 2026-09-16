@@ -282,6 +282,8 @@ class Engine:
         self._helpers = helper_names(suite)
         self._print_lock = threading.Lock()
         self._oauth_cache = {}
+        self._oauth_lock = threading.Lock()
+        self._oauth_bearer = None
         self._cassettes = load_cassettes(self.cassette_dir) if self.mode in ("replay", "record-on-miss") else {}
         self._cassette_lock = threading.Lock()
         self._last_duration = 0
@@ -651,6 +653,7 @@ class Engine:
             color=self._color,
         )
         child._oauth_cache = self._oauth_cache
+        child._oauth_lock = self._oauth_lock
         child._cassettes = self._cassettes
         child._cassette_lock = self._cassette_lock
         child._helpers = self._helpers
@@ -744,14 +747,13 @@ class Engine:
             self._print_error(str(exc), under_request=False)
             return False, str(exc), []
         self._client = client
+        self._oauth_bearer = None
         oauth = test.get("oauth2") or self.suite.get("oauth2")
         if oauth:
             try:
-                token = self._oauth_token(oauth)
+                self._oauth_bearer = self._oauth_token(oauth)
             except SnapAPIError as exc:
                 return False, str(exc), []
-            test.setdefault("headers", {})
-            test["headers"]["Authorization"] = f"Bearer {token}"
         requests_log = []
         for step in test.get("steps") or []:
             ok, error, recorded = self._execute_step(client, step, test)
@@ -772,6 +774,8 @@ class Engine:
             raw_body = self._interp(step.get("raw_body")) if step.get("raw_body") is not None else None
             headers = {}
             headers.update(test.get("headers") or {})
+            if self._oauth_bearer:
+                headers["Authorization"] = f"Bearer {self._oauth_bearer}"
             headers.update(step.get("headers") or {})
             headers = self._interp(headers) if headers else {}
             if step.get("oauth2"):
@@ -1331,17 +1335,61 @@ class Engine:
     def _save_value(self, save, response):
         self._commit_saves([save], response)
 
+    def _oauth_cache_key(self, spec):
+        """Identity for a cached access token.
+
+        Distinct token_url / client_id / secret / grant / username / redirect_uri
+        must not share a token. Scope is not a DSL parameter today.
+        """
+        grant = (spec.get("grant") or spec.get("grant_type") or "client_credentials").lower()
+        if grant in ("authorization-code", "authorization_code"):
+            grant = "authorization_code"
+        return (
+            self._interp(spec.get("token_url") or ""),
+            self._interp(spec.get("client_id") or ""),
+            self._interp(spec.get("client_secret") or ""),
+            grant,
+            self._interp(spec.get("username") or ""),
+            self._interp(spec.get("redirect_uri") or ""),
+        )
+
+    def _oauth_cached_access_token(self, key):
+        cached = self._oauth_cache.get(key)
+        if not cached:
+            return None
+        if isinstance(cached, str):
+            return cached
+        token = cached.get("access_token")
+        if not token:
+            return None
+        expires_at = cached.get("expires_at")
+        if expires_at is not None and time.time() >= float(expires_at):
+            return None
+        return token
+
     def _oauth_token(self, spec, force_refresh=False):
+        key = self._oauth_cache_key(spec)
+        if not force_refresh:
+            token = self._oauth_cached_access_token(key)
+            if token:
+                return token
+        with self._oauth_lock:
+            # Double-check after lock — waiters must reuse the winner's token.
+            if not force_refresh:
+                token = self._oauth_cached_access_token(key)
+                if token:
+                    return token
+            return self._oauth_fetch_token(key, spec, force_refresh=force_refresh)
+
+    def _oauth_fetch_token(self, key, spec, force_refresh=False):
+        """Request a token and publish it. Caller must hold ``_oauth_lock``."""
         token_url = self._interp(spec.get("token_url"))
         client_id = self._interp(spec.get("client_id"))
         secret = self._interp(spec.get("client_secret") or "")
         username = self._interp(spec.get("username") or "")
-        key = (token_url, client_id, username)
         cached = self._oauth_cache.get(key)
         if isinstance(cached, str):
             cached = {"access_token": cached}
-        if cached and cached.get("access_token") and not force_refresh:
-            return cached["access_token"]
         grant = (spec.get("grant") or spec.get("grant_type") or "client_credentials").lower()
         if force_refresh and cached and cached.get("refresh_token"):
             data = {
@@ -1398,6 +1446,7 @@ class Engine:
             body_type="form",
         )
         if response.status_code >= 400:
+            # Do not poison the cache — waiters/retries may acquire again.
             raise SnapAPIError(f"OAuth2 token request failed: {response.status_code}")
         try:
             payload = response.json()
@@ -1406,17 +1455,21 @@ class Engine:
         token = payload.get("access_token")
         if not token:
             raise SnapAPIError("OAuth2 token response missing access_token")
-        self._oauth_cache[key] = {
+        entry = {
             "access_token": token,
             "refresh_token": payload.get("refresh_token") or (cached or {}).get("refresh_token"),
         }
+        expires_in = payload.get("expires_in")
+        if expires_in is not None:
+            try:
+                entry["expires_at"] = time.time() + float(expires_in)
+            except (TypeError, ValueError):
+                pass
+        self._oauth_cache[key] = entry
         return token
 
     def _oauth_can_refresh(self, spec):
-        token_url = self._interp(spec.get("token_url"))
-        client_id = self._interp(spec.get("client_id"))
-        username = self._interp(spec.get("username") or "")
-        cached = self._oauth_cache.get((token_url, client_id, username))
+        cached = self._oauth_cache.get(self._oauth_cache_key(spec))
         if isinstance(cached, dict) and cached.get("refresh_token"):
             return True
         return False
