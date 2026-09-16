@@ -323,92 +323,122 @@ class Engine:
         self._notify("start_suite", self._suite_info())
 
         results = []
+        suite_error = None
+        suite_error_name = None
+        setup_failed = False
         if self.suite.get("setup"):
             setup_result = self._run_test(self.suite["setup"], role="setup")
             if setup_result.status == "failed":
+                setup_failed = True
                 setup_name = f"SUITE-SETUP ({self.suite['setup']})"
                 reason = f"suite setup {self.suite['setup']!r} failed"
                 results.extend(self._skip_primaries(reason))
-                suite_result = SuiteResult(
-                    name=self.suite.get("name"),
-                    source=self.suite.get("source"),
-                    tests=results,
-                    duration_ms=(time.perf_counter() - started) * 1000,
-                    error=setup_result.error or "failed",
-                    error_name=setup_name,
-                )
-                self.print_summary(suite_result)
-                self._notify("end_suite", suite_result)
-                return suite_result
+                suite_error = setup_result.error or "failed"
+                suite_error_name = setup_name
 
-        primaries = self._primary_tests()
-        use_parallel = self.workers > 1
-        if use_parallel:
-            deps = self._sibling_save_deps(primaries)
-            if deps:
-                self._print(
-                    self._paint(
-                        "  warning: tests share SAVE values across primaries; running sequentially",
-                        Fore.YELLOW,
-                    )
-                )
-                use_parallel = False
-                self.isolate_variables = False
-            elif any(test.get("depends") for test in primaries):
-                use_parallel = False
-        if use_parallel:
-            results.extend(self._run_parallel(primaries))
-        else:
-            for test in primaries:
-                skip_reason = self._skip_reason(test)
-                if skip_reason:
-                    results.append(
-                        TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped", error=skip_reason)
-                    )
-                    self._record_dep_status(test["name"], "skipped")
-                    self._notify("end_test", self._suite_info(), results[-1])
-                    continue
-                if not self._matches_filter(test):
-                    results.append(TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped"))
-                    self._notify("end_test", self._suite_info(), results[-1])
-                    continue
-                dep_reason = self._depends_reason(test)
-                if dep_reason:
-                    self._print_skip(test, dep_reason)
-                    results.append(
-                        TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped", error=dep_reason)
-                    )
-                    self._record_dep_status(test["name"], "skipped")
-                    self._notify("end_test", self._suite_info(), results[-1])
-                    continue
-                self._notify("start_test", self._suite_info(), test["name"], test.get("tags") or [])
-                batch = self._run_examples(test)
-                self._record_dep_batch(test["name"], batch)
-                results.extend(batch)
-                for item in batch:
-                    self._notify("end_test", self._suite_info(), item)
-                if self._should_stop(results):
-                    hint = (
-                        "omit -x / --stop-on-failure to continue"
-                        if self.stop_on_failure
-                        else "stopped by --maxfail"
-                    )
+        if not setup_failed:
+            primaries = self._primary_tests()
+            use_parallel = self.workers > 1
+            if use_parallel:
+                deps = self._sibling_save_deps(primaries)
+                if deps:
                     self._print(
                         self._paint(
-                            f"  stopped after {test['name']!r}  ({hint})",
-                            Fore.RED,
+                            "  warning: tests share SAVE values across primaries; running sequentially",
+                            Fore.YELLOW,
                         )
                     )
-                    break
+                    use_parallel = False
+                    self.isolate_variables = False
+                elif any(test.get("depends") for test in primaries):
+                    use_parallel = False
+            if use_parallel:
+                results.extend(self._run_parallel(primaries))
+            else:
+                for test in primaries:
+                    skip_reason = self._skip_reason(test)
+                    if skip_reason:
+                        results.append(
+                            TestResult(
+                                name=test["name"],
+                                tags=test.get("tags") or [],
+                                status="skipped",
+                                error=skip_reason,
+                            )
+                        )
+                        self._record_dep_status(test["name"], "skipped")
+                        self._notify("end_test", self._suite_info(), results[-1])
+                        continue
+                    if not self._matches_filter(test):
+                        results.append(
+                            TestResult(name=test["name"], tags=test.get("tags") or [], status="skipped")
+                        )
+                        self._notify("end_test", self._suite_info(), results[-1])
+                        continue
+                    dep_reason = self._depends_reason(test)
+                    if dep_reason:
+                        self._print_skip(test, dep_reason)
+                        results.append(
+                            TestResult(
+                                name=test["name"],
+                                tags=test.get("tags") or [],
+                                status="skipped",
+                                error=dep_reason,
+                            )
+                        )
+                        self._record_dep_status(test["name"], "skipped")
+                        self._notify("end_test", self._suite_info(), results[-1])
+                        continue
+                    self._notify("start_test", self._suite_info(), test["name"], test.get("tags") or [])
+                    batch = self._run_examples(test)
+                    self._record_dep_batch(test["name"], batch)
+                    results.extend(batch)
+                    for item in batch:
+                        self._notify("end_test", self._suite_info(), item)
+                    if self._should_stop(results):
+                        hint = (
+                            "omit -x / --stop-on-failure to continue"
+                            if self.stop_on_failure
+                            else "stopped by --maxfail"
+                        )
+                        self._print(
+                            self._paint(
+                                f"  stopped after {test['name']!r}  ({hint})",
+                                Fore.RED,
+                            )
+                        )
+                        break
 
+        # Always attempt SUITE-TEARDOWN when declared — including after setup
+        # failure — so partial setup cannot leak resources silently.
         if self.suite.get("teardown"):
-            self._run_test(self.suite["teardown"], role="teardown")
+            teardown_name = self.suite["teardown"]
+            try:
+                teardown_result = self._run_test(teardown_name, role="teardown")
+            except SnapAPIError as exc:
+                self._print_error(str(exc), under_request=False)
+                teardown_result = TestResult(name=teardown_name, status="failed", error=str(exc))
+            except Exception as exc:
+                # Teardown must not crash the runner or discard the suite outcome.
+                message = f"SUITE-TEARDOWN ({teardown_name}) crashed: {exc}"
+                self._print_error(message, under_request=False)
+                teardown_result = TestResult(name=teardown_name, status="failed", error=message)
+            if teardown_result.status == "failed":
+                label = f"SUITE-TEARDOWN ({teardown_name})"
+                detail = teardown_result.error or "failed"
+                if suite_error:
+                    suite_error = f"{suite_error}\n{label} also failed: {detail}"
+                else:
+                    suite_error = detail
+                    suite_error_name = label
 
         suite_result = SuiteResult(
             name=self.suite.get("name"),
             source=self.suite.get("source"),
             tests=results,
             duration_ms=(time.perf_counter() - started) * 1000,
+            error=suite_error,
+            error_name=suite_error_name,
         )
         self.print_summary(suite_result)
         self._notify("end_suite", suite_result)

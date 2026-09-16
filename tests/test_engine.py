@@ -278,6 +278,187 @@ TEST: Profile
     assert [item["path"] for item in http_server.requests] == ["/login"]
 
 
+def test_suite_teardown_failure_fails_suite(http_server):
+    http_server.on("GET", "/ok", json={"ok": True})
+    http_server.on("POST", "/cleanup", status=500, json={"ok": False})
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-TEARDOWN: Cleanup
+TEST: Ok
+  GET: /ok
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert result.passed == 1
+    assert result.failed == 0
+    assert not result.ok
+    assert result.error_name == "SUITE-TEARDOWN (Cleanup)"
+    assert "Status code expected 200, got 500" in (result.error or "")
+    assert [item["path"] for item in http_server.requests] == ["/ok", "/cleanup"]
+    assert "SUITE-TEARDOWN (Cleanup)" in output
+
+
+def test_suite_teardown_runs_after_failed_test(http_server):
+    http_server.on("GET", "/boom", status=500, json={})
+    http_server.on("POST", "/cleanup", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-TEARDOWN: Cleanup
+TEST: Boom
+  GET: /boom
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.failed == 1
+    assert result.error is None
+    assert [item["path"] for item in http_server.requests] == ["/boom", "/cleanup"]
+
+
+def test_suite_teardown_failure_with_failed_test_still_reported(http_server):
+    http_server.on("GET", "/boom", status=500, json={})
+    http_server.on("POST", "/cleanup", status=500, json={})
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-TEARDOWN: Cleanup
+TEST: Boom
+  GET: /boom
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.failed == 1
+    assert result.error_name == "SUITE-TEARDOWN (Cleanup)"
+    assert "SUITE-TEARDOWN (Cleanup)" in output
+    assert [item["path"] for item in http_server.requests] == ["/boom", "/cleanup"]
+
+
+def test_suite_teardown_runs_after_suite_setup_failure(http_server):
+    http_server.on("POST", "/login", status=401, json={})
+    http_server.on("POST", "/cleanup", json={"ok": True})
+    http_server.on("GET", "/me", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Authenticate
+  POST: /login
+  EXPECT: status == 200
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-SETUP: Authenticate
+SUITE-TEARDOWN: Cleanup
+TEST: Me
+  GET: /me
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.error_name == "SUITE-SETUP (Authenticate)"
+    assert result.skipped == 1
+    assert [item["path"] for item in http_server.requests] == ["/login", "/cleanup"]
+
+
+def test_suite_setup_and_teardown_both_fail_reports_both(http_server):
+    http_server.on("POST", "/login", status=401, json={})
+    http_server.on("POST", "/cleanup", status=500, json={})
+    result, _, output = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Authenticate
+  POST: /login
+  EXPECT: status == 200
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-SETUP: Authenticate
+SUITE-TEARDOWN: Cleanup
+TEST: Me
+  GET: /me
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.error_name == "SUITE-SETUP (Authenticate)"
+    assert "SUITE-TEARDOWN (Cleanup) also failed" in (result.error or "")
+    assert [item["path"] for item in http_server.requests] == ["/login", "/cleanup"]
+    assert "SUITE-SETUP (Authenticate)" in output
+
+
+def test_suite_teardown_multi_step_failure_fails_suite(http_server):
+    http_server.on("GET", "/ok", json={"ok": True})
+    http_server.on("POST", "/cleanup/1", json={"ok": True})
+    http_server.on("POST", "/cleanup/2", status=500, json={})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Cleanup
+  POST: /cleanup/1
+  EXPECT: status == 200
+  POST: /cleanup/2
+  EXPECT: status == 200
+SUITE-TEARDOWN: Cleanup
+TEST: Ok
+  GET: /ok
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert not result.ok
+    assert result.error_name == "SUITE-TEARDOWN (Cleanup)"
+    assert [item["path"] for item in http_server.requests] == ["/ok", "/cleanup/1", "/cleanup/2"]
+
+
+def test_suite_setup_teardown_happy_path(http_server):
+    http_server.on("POST", "/login", json={"token": "t"})
+    http_server.on("GET", "/me", json={"ok": True})
+    http_server.on("POST", "/cleanup", json={"ok": True})
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+HELPER: Authenticate
+  POST: /login
+  EXPECT: status == 200
+HELPER: Cleanup
+  POST: /cleanup
+  EXPECT: status == 200
+SUITE-SETUP: Authenticate
+SUITE-TEARDOWN: Cleanup
+TEST: Me
+  GET: /me
+  EXPECT: status == 200
+""",
+        )
+    )
+    assert result.ok
+    assert result.error is None
+    assert [item["path"] for item in http_server.requests] == ["/login", "/me", "/cleanup"]
+
+
 def test_depends_skips_when_upstream_fails(http_server):
     http_server.on("GET", "/create", status=500, json={})
     http_server.on("GET", "/get", json={"ok": True})

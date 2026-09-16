@@ -88,7 +88,8 @@ IMPORT: shared.sapi</code></pre>
           <tr><td><code>CALL</code></td><td><code>CALL: signature = crypto.generate_signature(${PAYLOAD}, ${SECRET})</code>. Stores the return value. See <a href="plugins.html">CALL</a>.</td></tr>
           <tr><td><code>IMPORT</code></td><td>Pull tests from another <code>.sapi</code> file (path relative to the current file). Not in the playground.</td></tr>
           <tr><td><code>HELPER</code></td><td>Named procedure with the same request/EXPECT/SAVE body as a test, but it is <strong>not</strong> a test case. Use it from <code>SUITE-SETUP</code> / <code>SETUP</code> / <code>TEARDOWN</code>.</td></tr>
-          <tr><td><code>SUITE-SETUP</code></td><td>Name of a <code>HELPER</code> (or a <code>TEST</code>) to run once before primaries. <code>SUITE-TEARDOWN</code> after.</td></tr>
+          <tr><td><code>SUITE-SETUP</code></td><td>Name of a <code>HELPER</code> (or a <code>TEST</code>) to run once before primaries. Failure skips primaries and fails the suite. <code>SUITE-TEARDOWN</code> still runs afterward when declared.</td></tr>
+          <tr><td><code>SUITE-TEARDOWN</code></td><td>Runs once after primaries (or after a failed <code>SUITE-SETUP</code>). Failure fails the suite and is never discarded, even if tests already failed.</td></tr>
         </tbody>
       </table>
 
