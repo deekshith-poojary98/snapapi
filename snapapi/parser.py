@@ -808,6 +808,21 @@ class TestParser:
                     lineno=lineno,
                 )
             params.setdefault("grant", grant)
+            pkce = str(params.get("pkce") or "").strip().lower()
+            if pkce in ("1", "true", "yes", "on"):
+                if grant != "authorization_code":
+                    raise ParseError(
+                        "AUTH oauth2 pkce=true is only valid with grant=authorization_code",
+                        filename=filename,
+                        lineno=lineno,
+                    )
+                if not params.get("code_verifier"):
+                    raise ParseError(
+                        "AUTH oauth2 pkce=true requires code_verifier "
+                        "(same verifier used when obtaining the authorization code)",
+                        filename=filename,
+                        lineno=lineno,
+                    )
             return {"_oauth2": params}
         if len(parts) != 2:
             raise ParseError(

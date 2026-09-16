@@ -8,7 +8,6 @@ import threading
 import time
 import base64
 import hashlib
-import secrets
 from concurrent.futures import FIRST_COMPLETED, CancelledError, ThreadPoolExecutor, wait
 from pathlib import Path
 from types import SimpleNamespace
@@ -1268,7 +1267,7 @@ class Engine:
             if not code:
                 raise SnapAPIError(
                     "OAuth2 authorization_code requires code=${AUTH_CODE} "
-                    "(SnapAPI does not open a browser for PKCE)"
+                    "(SnapAPI does not open a browser)"
                 )
             data = {
                 "grant_type": "authorization_code",
@@ -1278,10 +1277,17 @@ class Engine:
                 "redirect_uri": self._interp(spec.get("redirect_uri") or ""),
             }
             if _as_bool(spec.get("pkce"), False):
-                verifier, challenge = _pkce_s256()
+                # RFC 7636: authorize step used code_challenge; token exchange
+                # sends only the same code_verifier. SnapAPI does not perform
+                # the authorize redirect — the caller must supply that verifier.
+                verifier = self._interp(spec.get("code_verifier") or "")
+                if not verifier:
+                    raise SnapAPIError(
+                        "OAuth2 pkce=true requires code_verifier=${PKCE_VERIFIER} "
+                        "(same verifier used when obtaining AUTH_CODE; "
+                        "SnapAPI does not open a browser)"
+                    )
                 data["code_verifier"] = verifier
-                data["code_challenge"] = challenge
-                data["code_challenge_method"] = "S256"
         else:
             data = {
                 "grant_type": "client_credentials",
@@ -2009,11 +2015,10 @@ def _assert_value(actual, operator, expected, label, delta=None):
         raise AssertionError(f"Unknown operator {operator}")
 
 
-def _pkce_s256():
-    verifier = secrets.token_urlsafe(32)
-    digest = hashlib.sha256(verifier.encode("ascii")).digest()
-    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
-    return verifier, challenge
+def pkce_challenge_s256(verifier):
+    """RFC 7636 S256: BASE64URL(SHA256(ASCII(code_verifier))) without padding."""
+    digest = hashlib.sha256(str(verifier).encode("ascii")).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 def merge_query(endpoint, params):

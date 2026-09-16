@@ -259,7 +259,7 @@ HTTP `OPTIONS` is written as `REQUEST: OPTIONS /path` so it does not collide wit
 
 `AUTH: oauth2 grant=client_credentials token_url=... client_id=...` and `grant=password username=... password=...` fetch a token (cached). If the token response includes `refresh_token`, a 401 retries once after refresh.
 
-`AUTH: oauth2 grant=authorization_code token_url=... auth_url=... client_id=... redirect_uri=... code=${AUTH_CODE} pkce=true` exchanges an authorization code. SnapAPI does not open a browser; supply `${AUTH_CODE}` from the environment. With `pkce=true` the token request includes S256 `code_verifier` / `code_challenge` fields.
+`AUTH: oauth2 grant=authorization_code token_url=... client_id=... redirect_uri=... code=${AUTH_CODE} pkce=true code_verifier=${PKCE_VERIFIER}` exchanges an authorization code. SnapAPI does not open a browser or perform the authorize redirect; supply `${AUTH_CODE}` and, for PKCE, the **same** `${PKCE_VERIFIER}` you used when deriving `code_challenge` for the authorization request. With `pkce=true` the token request sends only `code_verifier` (RFC 7636) — never a freshly generated challenge.
 
 `AUTH: digest user:pass` uses `requests` HTTP Digest Auth.
 

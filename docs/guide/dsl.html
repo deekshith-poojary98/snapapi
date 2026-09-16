@@ -135,7 +135,7 @@ Bob,bob@example.com
           <tr><td><code>HEADER</code> / <code>HEADERS</code></td><td>Step headers overlay test headers overlay suite headers.</td></tr>
           <tr><td><code>AUTH: bearer TOKEN</code></td><td>Sets <code>Authorization: Bearer TOKEN</code>. Also <code>token</code>, <code>basic user:pass</code>.</td></tr>
           <tr><td><code>AUTH: digest user:pass</code></td><td>HTTP Digest (CLI / requests). Not in the playground.</td></tr>
-          <tr><td><code>AUTH: oauth2 …</code></td><td><code>grant=client_credentials</code>, <code>password</code>, or <code>authorization_code</code> with <code>token_url</code> and <code>client_id</code>. Tokens are cached; 401 retries once after refresh. SnapAPI does not open a browser for the code grant. Not in the playground.</td></tr>
+          <tr><td><code>AUTH: oauth2 …</code></td><td><code>grant=client_credentials</code>, <code>password</code>, or <code>authorization_code</code> with <code>token_url</code> and <code>client_id</code>. Tokens are cached; 401 retries once after refresh. SnapAPI does not open a browser for the code grant. With <code>pkce=true</code>, also pass <code>code_verifier</code> (the same verifier used to create the authorize <code>code_challenge</code>); the token request sends only that verifier. Not in the playground.</td></tr>
         </tbody>
       </table>
 
