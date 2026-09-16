@@ -30,6 +30,7 @@ from snapapi.redact import redact_body, redact_headers, redact_saved
 from snapapi.safety import assert_public_url
 from snapapi.select import eval_keyword_expr, eval_tag_expr
 from snapapi.variables import VAR_PATTERN, interpolate
+from snapapi.version import __version__ as SNAPAPI_VERSION
 
 init(autoreset=True)
 
@@ -1149,6 +1150,14 @@ class Engine:
         self._assert_json_value(actual, operator, expected, f"JSON {path}")
 
     def _assert_json_value(self, actual, operator, expected, label):
+        # JSON == / != follow JSON types (playground JS ===), not Python equality.
+        op = _norm_operator(operator)
+        if op == "==":
+            assert _json_equal(actual, expected), f"{label} expected {expected!r}, got {actual!r}"
+            return
+        if op == "!=":
+            assert not _json_equal(actual, expected), f"{label} expected not {expected!r}, got {actual!r}"
+            return
         _assert_value(actual, operator, expected, label)
 
     def _check_xpath(self, check, response):
@@ -1851,6 +1860,31 @@ def _json_type_name(value):
     return type(value).__name__
 
 
+def _json_equal(left, right):
+    """JSON equality matching the playground (JS ``===`` on JSON values).
+
+    Booleans are never equal to numbers (``true != 1``). JSON numbers compare
+    numerically, so ``1 == 1.0``. Objects and arrays compare structurally.
+    """
+    if isinstance(left, bool) or isinstance(right, bool):
+        return isinstance(left, bool) and isinstance(right, bool) and left is right
+    if left is None or right is None:
+        return left is right
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return left == right
+    if isinstance(left, str) and isinstance(right, str):
+        return left == right
+    if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
+        if len(left) != len(right):
+            return False
+        return all(_json_equal(a, b) for a, b in zip(left, right))
+    if isinstance(left, dict) and isinstance(right, dict):
+        if left.keys() != right.keys():
+            return False
+        return all(_json_equal(left[key], right[key]) for key in left)
+    return left == right
+
+
 def _same_set(left, right):
     left_items = list(left)
     right_items = list(right)
@@ -2187,7 +2221,7 @@ def _as_har(recorded):
     return {
         "log": {
             "version": "1.2",
-            "creator": {"name": "snapapi", "version": "0.3.0"},
+            "creator": {"name": "snapapi", "version": SNAPAPI_VERSION},
             "entries": [
                 {
                     "request": {

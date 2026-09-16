@@ -3,6 +3,6 @@
 from snapapi.engine import Engine
 from snapapi.exceptions import ParseError, SnapAPIError
 from snapapi.parser import TestParser
+from snapapi.version import __version__
 
-__version__ = "0.3.0"
 __all__ = ["Engine", "TestParser", "ParseError", "SnapAPIError", "__version__"]

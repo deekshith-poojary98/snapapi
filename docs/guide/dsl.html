@@ -194,7 +194,7 @@ EXPECT: status == 200 RETRY 5 ON 5xx BACKOFF 1s</code></pre>
       <table>
         <thead><tr><th>Form</th><th>Meaning</th></tr></thead>
         <tbody>
-          <tr><td><code>json $.x == v</code> / <code>!=</code> / <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td><td>Compare value</td></tr>
+          <tr><td><code>json $.x == v</code> / <code>!=</code> / <code>&gt;</code> <code>&gt;=</code> <code>&lt;</code> <code>&lt;=</code></td><td>Compare value. <code>==</code>/<code>!=</code> use JSON types (same as the playground): <code>true != 1</code>, <code>false != 0</code>; numbers compare numerically so <code>1 == 1.0</code>.</td></tr>
           <tr><td><code>json $.x contains v</code> / <code>not contains</code></td><td>Array membership or string substring</td></tr>
           <tr><td><code>json $.x matches</code> / <code>not matches</code></td><td>Regex on string value</td></tr>
           <tr><td><code>json $.x starts-with</code> / <code>ends-with</code></td><td>String prefix / suffix</td></tr>

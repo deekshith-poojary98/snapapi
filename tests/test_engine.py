@@ -1295,6 +1295,98 @@ TEST: Missing
     assert "should exist" in (result.tests[0].error or "")
 
 
+def test_json_equality_uses_json_types_not_python(http_server):
+    """JSON == / != match playground JS === (bool ≠ number; 1 == 1.0)."""
+    http_server.on(
+        "GET",
+        "/types",
+        json={
+            "ok": True,
+            "off": False,
+            "count": 1,
+            "ratio": 1.0,
+            "nested": {"enabled": True},
+            "flags": [True],
+        },
+    )
+    for label, expect in [
+        ("bool-as-one", "EXPECT: json $.ok == 1"),
+        ("false-as-zero", "EXPECT: json $.off == 0"),
+        ("nested", 'EXPECT: json $.nested == {"enabled": 1}'),
+        ("array", "EXPECT: json $.flags == [1]"),
+    ]:
+        result, _, _ = run_dsl(
+            _suite(
+                http_server,
+                f"""
+TEST: {label}
+  GET: /types
+  {expect}
+""",
+            )
+        )
+        assert not result.ok, label
+        assert "expected" in (result.tests[0].error or ""), label
+
+    result, _, _ = run_dsl(
+        _suite(
+            http_server,
+            """
+TEST: Ok
+  GET: /types
+  EXPECT: json $.ok == true
+  EXPECT: json $.ok != 1
+  EXPECT: json $.off == false
+  EXPECT: json $.off != 0
+  EXPECT: json $.count == 1
+  EXPECT: json $.count == 1.0
+  EXPECT: json $.ratio == 1
+  EXPECT: json $.nested == {"enabled": true}
+  EXPECT: json $.nested != {"enabled": 1}
+  EXPECT: json $.flags == [true]
+  EXPECT: json $.flags != [1]
+""",
+        )
+    )
+    assert result.ok, result.tests[0].error
+
+
+def test_json_equal_unit():
+    from snapapi.engine import _json_equal
+
+    assert _json_equal(True, True)
+    assert not _json_equal(True, 1)
+    assert not _json_equal(False, 0)
+    assert _json_equal(1, 1.0)
+    assert _json_equal({"enabled": True}, {"enabled": True})
+    assert not _json_equal({"enabled": True}, {"enabled": 1})
+    assert _json_equal([True], [True])
+    assert not _json_equal([True], [1])
+    assert _json_equal(None, None)
+    assert not _json_equal(None, False)
+
+
+def test_package_version_is_single_source():
+    from snapapi import __version__
+    from snapapi.engine import SNAPAPI_VERSION, _as_har
+    from snapapi.version import __version__ as source
+
+    assert __version__ == source == "0.5.0"
+    assert SNAPAPI_VERSION == source
+    har = _as_har(
+        SimpleNamespace(
+            method="GET",
+            url="http://example.com",
+            status_code=200,
+            request_headers={},
+            response_headers={},
+            response_body="{}",
+            duration_ms=1,
+        )
+    )
+    assert har["log"]["creator"]["version"] == source
+
+
 def test_expect_absent_exists_wildcard_semantics(http_server):
     """exists = at least one match; absent = zero matches (null still present)."""
     cases = [
